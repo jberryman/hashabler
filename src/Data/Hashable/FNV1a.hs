@@ -6,13 +6,6 @@ import Data.Word
 import Data.Bits
 
 {-
-hash = offset_basis
-for each octet_of_data to be hashed
-        hash = hash xor octet_of_data
-        hash = hash * FNV_prime
-return hash
-
-
 -- see also the non-powers of two mapping methods outlined:
 --  http://www.isthe.com/chongo/tech/comp/fnv/#FNV-1a
 
@@ -20,64 +13,59 @@ For test vectors:
     http://www.isthe.com/chongo/src/fnv/test_fnv.c
 -}
 
-fnvPrime32 :: Word32
-{-# INLINE fnvPrime32 #-}
-fnvPrime32 = 16777619
+-- FNV CONSTANTS ----------------------------------------------------
 
+-- The special FNV primes required for different hash output sizes:
+
+fnvPrime32 :: Word32
 fnvPrime64 :: Word64
+{-# INLINE fnvPrime32 #-}
 {-# INLINE fnvPrime64 #-}
+fnvPrime32 = 16777619
 fnvPrime64 = 1099511628211
 -- fnvPrime128 = 309485009821345068724781371
 -- fnvPrime256 = 374144419156711147060143317175368453031918731002211
 
-fnvOffsetBasis32 :: Word32
-{-# INLINE fnvOffsetBasis32 #-}
-fnvOffsetBasis32 = 2166136261
+-- The arbitrary initial seed values for different output hash sizes. These
+-- values are part of the spec, but there is nothing special about them;
+-- supposedly any non-zero value seed should be fine:
 
+fnvOffsetBasis32 :: Word32
 fnvOffsetBasis64 :: Word64
+{-# INLINE fnvOffsetBasis32 #-}
 {-# INLINE fnvOffsetBasis64 #-}
+fnvOffsetBasis32 = 2166136261
 fnvOffsetBasis64 = 14695981039346656037
 -- fnvOffsetBasis128 = 144066263297769815596495629667062367629
 -- fnvOffsetBasis256 = 100029257958052580907070968620625704837092796014241193945225284501741471925557
 
--- TODO remove:
-fnvInnerLoopTest :: Word8 -> Word32
-{-# INLINE fnvInnerLoopTest #-}
-fnvInnerLoopTest b = (fnvOffsetBasis32 `xor` fromIntegral b) * fnvPrime32
+-- FNV HASH KERNELS -------------------------------------------------
+
+infixl <#
+(<#) :: Word32 -> Word8 -> Word32
+{-# INLINE (<#) #-}
+(<#) h32 b = (h32 `xor` fromIntegral b) * fnvPrime32
+
+-- TODO 64-bit hashing
 
 
--- TODO remove:
-fnvInnerLoopTest4 :: (Word8 , Word8 , Word8 , Word8) -> Word32
-{-# INLINE fnvInnerLoopTest4 #-}
-fnvInnerLoopTest4 (b0,b1,b2,b3) = 
-    ((((((((fnvOffsetBasis32 `xor` fromIntegral b0) * fnvPrime32)
-    `xor` fromIntegral b1) * fnvPrime32)
-    `xor` fromIntegral b2) * fnvPrime32)
-    `xor` fromIntegral b3) * fnvPrime32)
+-- UNROLLED 32-BIT HASHING OF DIFFERENT VALUES: ---------------------
 
--- UNROLLED 32 BIT HASHES:
---    TODO bench alongside a <## operator, inlined
-fnvInnerLoopTestWord :: Word32 -> Word32
-fnvInnerLoopTestWord wd = case bytes32 wd of 
+hash32Word32 :: Word32 -> Word32
+{-# INLINE hash32Word32 #-}
+hash32Word32 wd = case bytes32 wd of 
   (b0,b1,b2,b3)->
-    ((((((((fnvOffsetBasis32 `xor` fromIntegral b0) * fnvPrime32)
-    `xor` fromIntegral b1) * fnvPrime32)
-    `xor` fromIntegral b2) * fnvPrime32)
-    `xor` fromIntegral b3) * fnvPrime32)
+    fnvOffsetBasis32 <# b0 <# b1 <# b2 <# b3
 
-fnvInnerLoopTestWord64 :: Word64 -> Word32
-{-# INLINE fnvInnerLoopTestWord64 #-}
-fnvInnerLoopTestWord64 wd = case bytes64 wd of
+hash32Word64 :: Word64 -> Word32
+{-# INLINE hash32Word64 #-}
+hash32Word64 wd = case bytes64_alt wd of
+-- fnvInnerLoopTestWord64 wd = case bytes64 wd of  -- NOTE: SLOW ON 32-bit arch
   (b0,b1,b2,b3,b4,b5,b6,b7) ->
-    ((((((((((((((((fnvOffsetBasis32 `xor` fromIntegral b0) * fnvPrime32)
-    `xor` fromIntegral b1) * fnvPrime32)
-    `xor` fromIntegral b2) * fnvPrime32)
-    `xor` fromIntegral b3) * fnvPrime32)
-    `xor` fromIntegral b4) * fnvPrime32)
-    `xor` fromIntegral b5) * fnvPrime32)
-    `xor` fromIntegral b6) * fnvPrime32)
-    `xor` fromIntegral b7) * fnvPrime32)
+    fnvOffsetBasis32 <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
 
+
+-----------------
 
 -- NOTE we're to hash these Word8s from left to right
 bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
@@ -85,26 +73,26 @@ bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 bytes32 wd = (shifted 24, shifted 16, shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
 
+-- TODO benchmark on different arch's and make conditional (but expose both for
+--      testing equivalence w/ quickcheck)
+-- faster for 64-bit archs?
 bytes64 :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
 {-# INLINE bytes64 #-}
 bytes64 wd = ( shifted 56, shifted 48, shifted 40, shifted 32
              , shifted 24, shifted 16, shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
 
+-- faster for 32-bit archs?
+bytes64_alt :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
+{-# INLINE bytes64_alt #-}
+bytes64_alt wd = 
+    let wd0 = fromIntegral $ unsafeShiftR wd 32
+        wd1 = fromIntegral wd
+        (b0,b1,b2,b3) = bytes32 wd0
+        (b4,b5,b6,b7) = bytes32 wd1
+     in (b0,b1,b2,b3,b4,b5,b6,b7)
 
 
--- TODO remove
-fnvInnerLoopTest8 :: (Word8 , Word8 , Word8 , Word8,Word8 , Word8 , Word8 , Word8) -> Word32
-{-# INLINE fnvInnerLoopTest8 #-}
-fnvInnerLoopTest8 (b0,b1,b2,b3,b4,b5,b6,b7) = 
-    ((((((((((((((((fnvOffsetBasis32 `xor` fromIntegral b0) * fnvPrime32)
-    `xor` fromIntegral b1) * fnvPrime32)
-    `xor` fromIntegral b2) * fnvPrime32)
-    `xor` fromIntegral b3) * fnvPrime32)
-    `xor` fromIntegral b4) * fnvPrime32)
-    `xor` fromIntegral b5) * fnvPrime32)
-    `xor` fromIntegral b6) * fnvPrime32)
-    `xor` fromIntegral b7) * fnvPrime32)
 
 
 -- NOTES:
@@ -119,6 +107,12 @@ fnvInnerLoopTest8 (b0,b1,b2,b3,b4,b5,b6,b7) =
 --   - using unsafeShiftR to get bytes is fast and probably our best choice
 --   - largeword is much too slow to be usable
 --   - 64-bit multiplication is slow on 32-bit (overhead of ~10ns)
+--   - bytes64 is very slow on 32-bit
+--   - TODO we could use SIMD vectors for wider than 32 hash bits!
+--      - but need to test that this is principled.
+--
+-- WISHLIST:
+--   - :: Word64 -> (Word32,Word32)  for 32-bit machines.
 --
 -- CROSS-PLATFORM NOTES:
 --   - Int is a bit weird; it's like Word split and wrapped around

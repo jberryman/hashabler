@@ -52,10 +52,11 @@ main = do
         !w64 = force maxBound :: Word64
         !w64prime = force 1099511628211 :: Word64
     defaultMain [ 
-        bench "test" $ nf fnvInnerLoopTest 7
-      , bench "test4" $ nf fnvInnerLoopTest4 (7,8,9,10)
-      , bench "testWord" $ nf fnvInnerLoopTestWord 117967114
-      , bench "test8" $ nf fnvInnerLoopTest8 (7,8,9,10, 11,12,13,14)
+        bench "bytes32" $ nf bytes32 0x66666666
+      , bench "testWord w/ helper 32" $ nf hash32Word32 0x66666666
+      , bench "bytes64" $ nf bytes64 0x66666666
+      , bench "bytes64_alt" $ nf bytes64_alt 0x66666666
+      , bench "testWord w/ helper 64" $ nf hash32Word64 0x6666666666666666
 
       , bench "baseline32" $ nf (\x-> x) (777::Word32)
 
@@ -78,6 +79,7 @@ main = do
       , bench "baseline bytes" $ nf (\x-> x) (3::Word8,4::Word8,5::Word8,6::Word8)
       , bench "baseline bytes (deepseq'd)" $ nf (\x-> x) bytes4
       -}
+      {- largewords extremely slow, 64bit multiply on 32bit is slow
       , bench "128 fromIntegral" $ nf to128 111
       , bench "128 fromIntegral xor" $ nf (xor w128 . to128) 111
       , bench "128 fromIntegral xor * prime" $ nf ((* w128prim) . xor w128 . to128) 111
@@ -87,5 +89,6 @@ main = do
       , bench "64 fromIntegral xor" $ nf (xor w64 . to64) 111
       , bench "64 fromIntegral xor * prime" $ nf ((* w64prime) . xor w64 . to64) 111
       , bench "baseline w64" $ nf (\x-> x) w64
+      -}
       ]
 

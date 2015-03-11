@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric,StandaloneDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Main ( 
     main
    ) where
@@ -21,6 +22,16 @@ import Data.Bits
 import Control.DeepSeq
 import Data.LargeWord
 import GHC.Generics
+import Data.Char
+
+import Foreign.Marshal.Utils
+import Foreign.Storable
+import PrimUtilities
+
+-- floating-bits "does not really work"
+-- import Data.Bits.Floating
+
+
 
 instance (NFData a, NFData b)=> NFData (LargeKey a b)
 deriving instance Generic (LargeKey a b)
@@ -57,6 +68,16 @@ main = do
       , bench "bytes64" $ nf bytes64 0x66666666
       , bench "bytes64_alt" $ nf bytes64_alt 0x66666666
       , bench "testWord w/ helper 64" $ nf hash32Word64 0x6666666666666666
+      , bench "test ord Char" $ nf ord maxBound
+      , bench "Word8 roundtrip alloca/peek" $ nfIO $ with (0::Word8)  peek
+
+      , bench "floatToWord" $ nf floatToWord 1.11111
+      , bench "baseline Float" $ nf (\x-> x) (1.11111 :: Float)
+      , bench "doubleToWord" $ nf doubleToWord 1.111111111111
+      , bench "baseline double" $ nf (\x-> x)  (1.111111111111 :: Double)
+
+      , bench "decodeFloat" $ nf decodeFloat (1.11111 :: Float)
+      , bench "baseline decodeFloat" $ nf (\x-> x) (9320666::Integer,-23::Int)
 
       , bench "baseline32" $ nf (\x-> x) (777::Word32)
 

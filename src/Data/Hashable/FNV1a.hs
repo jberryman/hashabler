@@ -1,9 +1,35 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}  -- TEMPORARY
 module Data.Hashable.FNV1a 
     where
     
 import Data.Word
+import Data.Int
 import Data.Bits
+import Data.Char
+import Control.Exception(assert)
+import PrimUtilities
+
+-- TEMPORARY ------------
+-- For casting of floating point values:
+import Data.Word (Word32, Word64)
+import Data.Array.ST (newArray, readArray, MArray, STUArray)
+import Data.Array.Unsafe (castSTUArray)
+import GHC.ST (runST, ST)
+
+-- These are slow as shit (at least 10ns overhead)
+floatToWord :: Float -> Word32
+floatToWord x = runST (cast x)
+
+doubleToWord :: Double -> Word64
+doubleToWord x = runST (cast x)
+
+{-# INLINE cast #-}
+cast :: (MArray (STUArray s) a (ST s),
+         MArray (STUArray s) b (ST s)) => a -> ST s b
+cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
+-- TEMPORARY ------------
+
 
 {-
 -- see also the non-powers of two mapping methods outlined:
@@ -49,7 +75,14 @@ infixl <#
 -- TODO 64-bit hashing
 
 
--- UNROLLED 32-BIT HASHING OF DIFFERENT VALUES: ---------------------
+-- UNROLLED 32-BIT HASHING OF DIFFERENT TYPES: ----------------------
+
+-- TODO BENCHMARK hash32WithSalt against these and probably remove:
+hash32Word16 :: Word16 -> Word32
+{-# INLINE hash32Word16 #-}
+hash32Word16 wd = case (fromIntegral $ unsafeShiftR wd 8, fromIntegral wd) of 
+  (b0,b1)->
+    fnvOffsetBasis32 <# b0 <# b1
 
 hash32Word32 :: Word32 -> Word32
 {-# INLINE hash32Word32 #-}
@@ -65,9 +98,9 @@ hash32Word64 wd = case bytes64_alt wd of
     fnvOffsetBasis32 <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
 
 
------------------
+-- EXTRACTING BYTES FROM DIFFERENT TYPES ----------------------------
+-- NOTE we're to hash the resulting Word8s from left to right
 
--- NOTE we're to hash these Word8s from left to right
 bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 {-# INLINE bytes32 #-}
 bytes32 wd = (shifted 24, shifted 16, shifted 8, fromIntegral wd)
@@ -93,7 +126,203 @@ bytes64_alt wd =
      in (b0,b1,b2,b3,b4,b5,b6,b7)
 
 
+-- Get raw IEEE bytes from floating point types. What a horror show...
+-- TODO better, if possible
+bytesFloat :: Float -> (Word8,Word8,Word8,Word8)
+bytesFloat fl = 
+    case decodeFloat_Int fl of
+         (man,ex) -> 
+            let expWordShifted :: Word32
+                expWordShifted = unsafeShiftL (fromIntegral (ex+150)) 23 -- TODO why 150?
+                -- expWordShifted = unsafeShiftL (fromIntegral (ex+127)) 23 
 
+                manWord :: Word32
+                manWord = fromIntegral man
+                -- NOT QUITE! we need to convert from two's complement to signed
+                --    how? with a shiftL or something??
+
+                
+
+                ieeeFloat = manWord .|. expWordShifted
+                
+             in bytes32 ieeeFloat
+                {-
+                assert (man is max representable in 23 bits) -- or
+                assert (bits 23 - 30 of manWord are all 0) -- and/or
+                assert (ex+127 >= 0)
+                assert (ieeeFloat == manWord `xor` expWordShifted) -- this might sum up above better
+                -}
+
+bytesFloatGood :: Float ->  (Word8,Word8,Word8,Word8)
+bytesFloatGood = bytes32 . floatToWord
+--01001011 00100000
+--01001011 10100000 -- off by one!
+-- 1001011 00000000000000000000  -- With the one coming from man!!
+--                               -- Do we need to just unset that bit?? (and assert it's always set?)
+
+-- http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs
+twosComp2SignedMag :: Int -> Word32
+{-# INLINE twosComp2SignedMag #-}
+twosComp2SignedMag x = 
+    -- TODO test, and also look at core here; see if we can/should factor out
+    let v = fromIntegral x 
+     in ((v + (v `unsafeShiftR` 31)) `xor` (v `unsafeShiftR` 31)) .|. (v .&. 0x80000000);
+
+
+-- HASHABLE CLASS AND INSTANCES -------------------------------------
+
+
+-- | A class of types that can be converted into a hash value. For relevant
+-- instances of primitive types, we expect 'hash32' and 'hash64' to produce
+-- values following the FNV1a spec. We expect all other instances to display
+-- "good" hashing properties (w/r/t avalanche, bit indepepndence, etc.) where
+-- "good" is only evidenced by our test suite, for now.
+-- TODO revise this in light of what we actual get from test vectors.
+class Hashable a where
+    -- | Produce a 32-bit hash value using the supplied seed. The seed should
+    -- be non-zero although this is not checked.
+    hash32WithSalt :: Word32 -> a -> Word32
+
+    -- TODO
+    -- | Produce a 64-bit hash value using the supplied seed. The seed should
+    -- be non-zero although this is not checked.
+    -- hash64WithSalt :: Word64 -> a -> Word64
+
+    -- NOTE: these are just here so we can override them with faster
+    -- implementations, and pre-computed bits.
+
+    -- | Hash a value using the standard spec-prescribed 32-bit seed value.
+    --
+    -- > hash32 = hash32WithSalt 2166136261
+    hash32 :: Hashable a=> a -> Word32
+    {-# INLINE hash32 #-}
+    hash32 = hash32WithSalt fnvOffsetBasis32
+    
+    -- TODO
+    -- hash64 :: Hashable a=> a -> Word64
+    -- {-# INLINE hash64 #-}
+    -- hash64 = hash64WithSalt fnvOffsetBasis64
+
+-- ---------
+-- Instances that ought to match the test vectors from the spec!
+
+
+
+-- | 'True' hashes to @'hash32' (1::Word8)@, 'False' hashes to @'hash32' (0::Word8)@
+-- TODO or use fromBool/toBool from Foreign.Marshal.Utils (why?)
+instance Hashable Bool where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed b
+       | b         = hash32WithSalt seed (1::Word8) 
+       | otherwise = hash32WithSalt seed (0::Word8)
+
+    {-# INLINE hash32 #-}
+    hash32 b = 
+        let h = if b then 67918732 else 84696351
+         in assert (h == hash32WithSalt fnvOffsetBasis32 b) h
+
+-- ---------
+-- Architecture-dependent types, with special handling.
+instance Hashable Int where
+instance Hashable Word where
+
+                             -- "values represent Unicode (or equivalently ISO/IEC 10646) characters..."
+instance Hashable Char where -- maxbound is 1114111 (~21 bits), `ord :: Char -> Int`
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = hash32WithSalt seed . ord
+    -- TODO pre-hash all but last 3 bytes.
+
+
+-- TODO use decodeFloat_ / decodeDouble_ from Prim to extract bits?
+--      or decodeFloat from RealFloat
+--         good for Float (calls decodeFloat_Int)
+--         BAD for Double (I think)
+--      or toRational, then convert Integers?
+
+-- try to match IEEE single-precision type hash?
+instance Hashable Float where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed x = assert (isIEEE x) undefined
+-- try to match IEEE double-precision type hash?
+instance Hashable Double where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed x = assert (isIEEE x) undefined
+
+
+-- GHC uses two's complement representation for signed ints; C has this
+-- undefined; just cast to Word and hash.
+
+instance Hashable Int8 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word8)
+
+instance Hashable Int16 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word16)
+
+instance Hashable Int32 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word32)
+
+instance Hashable Int64 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word64)
+
+-- Straightforward hashing of different Words and byte arrays:
+
+instance Hashable Word8 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt = (<#)
+
+instance Hashable Word16 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed wd = case (fromIntegral $ unsafeShiftR wd 8, fromIntegral wd) of 
+      (b0,b1)->
+        seed <# b0 <# b1
+
+instance Hashable Word32 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed wd = case bytes32 wd of 
+      (b0,b1,b2,b3)->
+        seed <# b0 <# b1 <# b2 <# b3
+
+instance Hashable Word64 where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed wd = case bytes64_alt wd of
+ -- hash32WithSalt seed wd = case bytes64 wd of     -- TODO CONDITIONAL on arch
+      (b0,b1,b2,b3,b4,b5,b6,b7) ->
+        seed <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
+{-
+instance Hashable S.ByteString where
+instance Hashable L.ByteString where
+instance Hashable ShortByteString where
+instance Hashable S.Text where
+instance Hashable L.Text where
+
+-- ---------
+-- These ought to hash in some reasonable and good way. Recursive instances
+-- ought to be defined in terms of hash*WithSalt on subterms; this should
+-- ensure we don't get e.g. hash [[1],[2,3]] == hash [[1,2],[3]].
+
+instance Hashable Integer where
+    -- GHC.Integer.GMP.Internals from integer-gmp (part of GHC distribution)
+instance (Integral a, Hashable a) => Hashable (Ratio a) where
+instance Hashable Ordering where
+instance Hashable () where
+instance Hashable ThreadId where
+instance Hashable TypeRep where
+instance Hashable (StableName a) where
+
+instance Hashable a => Hashable [a] where
+instance Hashable a => Hashable (Maybe a) where
+instance (Hashable a, Hashable b) => Hashable (Either a b) where
+instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
+instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
+instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4) => Hashable (a1, a2, a3, a4) where
+instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5) => Hashable (a1, a2, a3, a4, a5) where
+instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6) => Hashable (a1, a2, a3, a4, a5, a6) where
+instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7) => Hashable (a1, a2, a3, a4, a5, a6, a where
+-}
 
 -- NOTES:
 --   - no overhead from fromIntegral
@@ -110,6 +339,19 @@ bytes64_alt wd =
 --   - bytes64 is very slow on 32-bit
 --   - TODO we could use SIMD vectors for wider than 32 hash bits!
 --      - but need to test that this is principled.
+--
+-- TODO IMPLEMENTATION:
+--   - hash functions with user's seed (we pass this in recursively on e.g. list)
+--   - 32- and 64-bit hashes (other lengths are impractical)
+--   - arbitrary-length hashes with user-supplied seed
+--     - possibly both 32 and 64-bit chunks, for speed on different arches
+--     - possibly using SIMD vectors!
+--     - NOTE: we need to check seed avalance here.
+--   - documentation:
+--     - versioning
+--     - expectations of randomness
+--     - expectation of permanence (re. to serializability)
+--     - performance concerns
 --
 -- WISHLIST:
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.

@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE FlexibleContexts #-}  -- TEMPORARY
+{-# LANGUAGE FlexibleContexts #-}
 module Data.Hashable.FNV1a 
     where
     
@@ -8,27 +8,12 @@ import Data.Int
 import Data.Bits
 import Data.Char
 import Control.Exception(assert)
-import PrimUtilities
 
--- TEMPORARY ------------
 -- For casting of floating point values:
 import Data.Word (Word32, Word64)
 import Data.Array.ST (newArray, readArray, MArray, STUArray)
 import Data.Array.Unsafe (castSTUArray)
 import GHC.ST (runST, ST)
-
--- These are slow as shit (at least 10ns overhead)
-floatToWord :: Float -> Word32
-floatToWord x = runST (cast x)
-
-doubleToWord :: Double -> Word64
-doubleToWord x = runST (cast x)
-
-{-# INLINE cast #-}
-cast :: (MArray (STUArray s) a (ST s),
-         MArray (STUArray s) b (ST s)) => a -> ST s b
-cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
--- TEMPORARY ------------
 
 
 {-
@@ -126,47 +111,31 @@ bytes64_alt wd =
      in (b0,b1,b2,b3,b4,b5,b6,b7)
 
 
--- Get raw IEEE bytes from floating point types. What a horror show...
+
+-- Get raw IEEE bytes from floating point types.
 -- TODO better, if possible
 bytesFloat :: Float -> (Word8,Word8,Word8,Word8)
-bytesFloat fl = 
-    case decodeFloat_Int fl of
-         (man,ex) -> 
-            let expWordShifted :: Word32
-                expWordShifted = unsafeShiftL (fromIntegral (ex+150)) 23 -- TODO why 150?
-                -- expWordShifted = unsafeShiftL (fromIntegral (ex+127)) 23 
+{-# INLINE bytesFloat #-}
+bytesFloat = bytes32 . floatToWord
 
-                manWord :: Word32
-                manWord = fromIntegral man
-                -- NOT QUITE! we need to convert from two's complement to signed
-                --    how? with a shiftL or something??
+bytesDouble :: Double -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
+{-# INLINE bytesDouble #-}
+bytesDouble = bytes64_alt . doubleToWord
+--bytesDouble = bytes64 . doubleToWord -- TODO conditional upon arch
 
-                
 
-                ieeeFloat = manWord .|. expWordShifted
-                
-             in bytes32 ieeeFloat
-                {-
-                assert (man is max representable in 23 bits) -- or
-                assert (bits 23 - 30 of manWord are all 0) -- and/or
-                assert (ex+127 >= 0)
-                assert (ieeeFloat == manWord `xor` expWordShifted) -- this might sum up above better
-                -}
+-- See: http://stackoverflow.com/a/7002812/176841 . 
+-- Someone just kill me now...
+floatToWord :: Float -> Word32
+floatToWord x = runST (cast x)
 
-bytesFloatGood :: Float ->  (Word8,Word8,Word8,Word8)
-bytesFloatGood = bytes32 . floatToWord
---01001011 00100000
---01001011 10100000 -- off by one!
--- 1001011 00000000000000000000  -- With the one coming from man!!
---                               -- Do we need to just unset that bit?? (and assert it's always set?)
+doubleToWord :: Double -> Word64
+doubleToWord x = runST (cast x)
 
--- http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs
-twosComp2SignedMag :: Int -> Word32
-{-# INLINE twosComp2SignedMag #-}
-twosComp2SignedMag x = 
-    -- TODO test, and also look at core here; see if we can/should factor out
-    let v = fromIntegral x 
-     in ((v + (v `unsafeShiftR` 31)) `xor` (v `unsafeShiftR` 31)) .|. (v .&. 0x80000000);
+cast :: (MArray (STUArray s) a (ST s),
+         MArray (STUArray s) b (ST s)) => a -> ST s b
+{-# INLINE cast #-}
+cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
 
 
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
@@ -239,14 +208,25 @@ instance Hashable Char where -- maxbound is 1114111 (~21 bits), `ord :: Char -> 
 --         BAD for Double (I think)
 --      or toRational, then convert Integers?
 
--- try to match IEEE single-precision type hash?
+-- TODO OR USE TUPLE INSTANCES HERE?
+
+-- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly
+-- slow; complain here: http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Float where
     {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed x = assert (isIEEE x) undefined
--- try to match IEEE double-precision type hash?
+    hash32WithSalt seed x = assert (isIEEE x) $
+     case bytesFloat x of 
+          (b0,b1,b2,b3)->
+            seed <# b0 <# b1 <# b2 <# b3
+
+-- | Hash a Double as IEEE 754 double-precision format bytes. This is terribly
+-- slow; complain here: http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Double where
     {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed x = assert (isIEEE x) undefined
+    hash32WithSalt seed x = assert (isIEEE x) $
+     case bytesDouble x of 
+          (b0,b1,b2,b3,b4,b5,b6,b7) ->
+            seed <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
 
 
 -- GHC uses two's complement representation for signed ints; C has this
@@ -270,6 +250,7 @@ instance Hashable Int64 where
 
 -- Straightforward hashing of different Words and byte arrays:
 
+-- TODO OR USE TUPLE INSTANCES HERE?
 instance Hashable Word8 where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt = (<#)

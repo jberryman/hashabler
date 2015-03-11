@@ -26,7 +26,6 @@ import Data.Char
 
 import Foreign.Marshal.Utils
 import Foreign.Storable
-import PrimUtilities
 
 -- floating-bits "does not really work"
 -- import Data.Bits.Floating
@@ -72,12 +71,18 @@ main = do
       , bench "Word8 roundtrip alloca/peek" $ nfIO $ with (0::Word8)  peek
 
       , bench "floatToWord" $ nf floatToWord 1.11111
-      , bench "baseline Float" $ nf (\x-> x) (1.11111 :: Float)
+      , bench "baseline Word32" $ nf (\x-> x) (111 :: Word32)
       , bench "doubleToWord" $ nf doubleToWord 1.111111111111
-      , bench "baseline double" $ nf (\x-> x)  (1.111111111111 :: Double)
+      , bench "baseline Word64" $ nf (\x-> x)  (111 :: Word64)
 
+      , bench "bytesFloat" $ nf bytesFloat (1.11111)
+      , bench "bytesDouble" $ nf bytesDouble (1.111111111111)
+      , bench "baseline bytes (deepseq'd)" $ nf (\x-> x) bytes4
+
+      {- Also really fucking slow
       , bench "decodeFloat" $ nf decodeFloat (1.11111 :: Float)
       , bench "baseline decodeFloat" $ nf (\x-> x) (9320666::Integer,-23::Int)
+      -}
 
       , bench "baseline32" $ nf (\x-> x) (777::Word32)
 

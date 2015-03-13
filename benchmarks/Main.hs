@@ -30,6 +30,7 @@ import Foreign.Storable
 -- floating-bits "does not really work"
 -- import Data.Bits.Floating
 
+import Data.List
 
 
 instance (NFData a, NFData b)=> NFData (LargeKey a b)
@@ -47,6 +48,7 @@ xor4 :: (Word8,Word8,Word8,Word8) -> Word8
 xor4 (a,b,c,d) = a `xor` b `xor` c `xor` d `xor` a `xor` b `xor` c `xor` d 
 
 
+
 main :: IO ()
 main = do
     let lbs32 = toLazyByteString . int32LE $ (777::Int32)
@@ -61,8 +63,38 @@ main = do
         to64 = fromIntegral
         !w64 = force maxBound :: Word64
         !w64prime = force 1099511628211 :: Word64
+
+    -- LISTS INSTANCES SCRATCH:
+      -- Significantly slower than unfolded:
+      -- , bench "hashFoldl'" $ nf (hashFoldl' fnvOffsetBasis32) [1..250]
+      -- , bench "hashFoldl'Extra" $ nf (hashFoldl'Extra fnvOffsetBasis32) [1..250]
+      -- , bench "hashFoldr" $ nf (hashFoldr fnvOffsetBasis32) [1..250]
+      -- , bench "hashFoldrExtra" $ nf (hashFoldrExtra fnvOffsetBasis32) [1..250]
+
+    let listBgroup nm sz = bgroup nm [
+            -- ideal code, for baseline:
+              bench "hashLeftNoList" $ nf (hashLeftNoList fnvOffsetBasis32) sz
+            -- ...and this only  a few % faster:
+          --, bench "hashLeftUnfoldedNoList" $ nf (hashLeftUnfoldedNoList fnvOffsetBasis32) sz
+            -- Slow:
+          --, bench "hashFoldr trying to fuse" $ nf (\i-> hashFoldr fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
+            -- Slow:
+            , bench "hashFoldl'" $ nf (hashFoldl' fnvOffsetBasis32) [1..sz]
+            -- !!! As fast as hashLeftNoList -- TODO is there really a rule firing here?
+            , bench "hashFoldl' trying to fuse" $ nf (\i-> hashFoldl' fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
+            , bench "hashFoldl'Extra trying to fuse" $ nf (\i-> hashFoldl'Extra fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
+            -- Faster than un-fused (I think that's what's happening) fold-based code:
+            , bench "hashLeftUnfolded" $ nf (hashLeftUnfolded fnvOffsetBasis32) [1..sz]
+            , bench "hashLeftUnfoldedExtra" $ nf (hashLeftUnfoldedExtra fnvOffsetBasis32) [1..sz]
+            ]
     defaultMain [ 
         bench "bytes32" $ nf bytes32 0x66666666
+        
+      , listBgroup "medium-size lists" 250
+      -- In line with above, although NoList variants win out by a greater margin:
+      --, listBgroup "small lists" 5
+
+
       , bench "testWord w/ helper 32" $ nf hash32Word32 0x66666666
       , bench "bytes64" $ nf bytes64 0x66666666
       , bench "bytes64_alt" $ nf bytes64_alt 0x66666666

@@ -7,6 +7,7 @@ import Data.Word
 import Data.Int
 import Data.Bits
 import Data.Char
+import Data.List
 import Control.Exception(assert)
 
 -- For casting of floating point values:
@@ -39,7 +40,8 @@ fnvPrime64 = 1099511628211
 
 -- The arbitrary initial seed values for different output hash sizes. These
 -- values are part of the spec, but there is nothing special about them;
--- supposedly any non-zero value seed should be fine:
+-- supposedly, in terms of hash quality, any non-zero value seed should be
+-- fine:
 
 fnvOffsetBasis32 :: Word32
 fnvOffsetBasis64 :: Word64
@@ -140,6 +142,10 @@ cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
 
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
 
+
+-- TODO MAYBE rename these methods:
+--        - possibly use (<#) operator
+--        - mention that we're "mixing right hand data into left-hand side hash"
 
 -- | A class of types that can be converted into a hash value. For relevant
 -- instances of primitive types, we expect 'hash32' and 'hash64' to produce
@@ -297,7 +303,32 @@ instance Hashable (StableName a) where
 instance Hashable a => Hashable [a] where
 instance Hashable a => Hashable (Maybe a) where
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
+-}
+
+-- TUPLES:
+-- TODO hmmmm, but we'd probably like tuples of Word8 to simply hash up the words together, no?
+--      if so, then do we need the extra method trick?
+--      OR: - add a method:
+--              combine :: Hashable a=> Hash32 -> a -> Hash32
+--              -... wait... do we even need that?
+--              if not TODO rename seed -> "hash" and add newtype wrapper.
+--          - and/or create a newtype wrapper for hash values
+--
+-- NOTES FOR DOCUMENTATION
+--   sum types must mix in a byte indicating the constructor
+--     this should be numbered from 1 ascending (but what about > 255 constructor types??)
+--   variable-length types (arrays) should also be "completed" with a byte
+--   TODO can this safely come at the end? I THINK SO
+--        but what about recursive sum types (lists!) ?
+--          we don't want (I think) to hash an extra bite at each (:) level! So what's the rule?
+
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b) = seed `hash32WithSalt` a `hash32WithSalt` b
+    -- TODO: SHIT! but what if a and b are, e.g. [Word8]
+    --       we get into false identical hashes!
+    
+{-
 instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4) => Hashable (a1, a2, a3, a4) where
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5) => Hashable (a1, a2, a3, a4, a5) where
@@ -320,6 +351,14 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 --   - bytes64 is very slow on 32-bit
 --   - TODO we could use SIMD vectors for wider than 32 hash bits!
 --      - but need to test that this is principled.
+--
+-- TESTING NOTES:
+--   - test that Generic instances derived from identically-shaped types match in every way behavior of instances defined here
+--   - variable-width & sum types:
+--     - test in an automated way [[1,2],[3]] vs [[1]],[2,3]] issue
+--     - somehow test problem of marker bits added to *end* i.e. 
+--   - cross-architecture compatibility (against serialized random output from quickcheck)
+--   - avalanche etc. properties for both primitive and compount instances
 --
 -- TODO IMPLEMENTATION:
 --   - hash functions with user's seed (we pass this in recursively on e.g. list)
@@ -364,3 +403,69 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 -- QUESTIONS:
 --   - principled way to test for lossless convertable Ints / Words (maybe look at impl of fromInteger)
 --   + fastest way to get access to bytes of integer types
+
+---------------- LIST INSTANCE SCRATCH WORK:
+-- overhead of doing an extra (* prime) at each recursive call:
+-- hash32WithSaltExtra :: Word32 -> Word8 -> Word32   -- NO DIFFERENT
+hash32WithSaltExtra :: (Hashable a)=> Word32 -> a -> Word32
+{-# INLINE hash32WithSaltExtra #-}
+hash32WithSaltExtra h a = (h * fnvPrime32) `hash32WithSalt` a
+
+-- testing. NOTE: we're omiting handling of empty vs. full list
+hashFoldl', hashFoldl'Extra, hashFoldr, hashFoldrExtra, hashLeftUnfolded, hashLeftUnfoldedExtra :: Word32 -> [Word8] -> Word32
+{-# INLINE hashFoldr #-}
+{-# INLINE hashFoldrExtra #-}
+hashFoldr = foldr (\a h'-> h' `hash32WithSalt` a) -- NOTE: hashing backwards
+hashFoldrExtra = foldr (\a h'-> h' `hash32WithSaltExtra` a) -- NOTE: hashing backwards
+
+
+-- INSERTING A MULTIPLY BETWEEN EACH IS ~ 68% SLOWER
+{-# INLINE hashFoldl'Extra #-}
+hashFoldl'Extra = foldl' (\h' a-> h' `hash32WithSaltExtra` a) 
+
+-- USE THIS VERSION:
+{-# INLINE hashFoldl' #-}
+hashFoldl' = foldl' (\h' a-> h' `hash32WithSalt` a)
+
+-- ELSE IF NO FUSION HAPPENS (TODO VERIFY THIS IS WHY ABOVE FAST) THEN REWRITE TO THIS VERSION:
+-- This is much faster:
+hashLeftUnfolded = go
+    where go !h [] = h
+          -- go !h (a1:a2:a3:a4:a5:a6:a7:a8:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7 `hash32WithSalt` a8) as
+          -- go !h (a1:a2:a3:a4:a5:a6:a7:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7) as
+          -- This seems to be sweet spot on my machine:
+          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6) as
+          go !h (a1:a2:a3:a4:a5:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5) as
+          go !h (a1:a2:a3:a4:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4) as
+          go !h (a1:a2:a3:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3) as
+          go !h (a1:a2:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2) as
+          go !h (a1:as) = go (h `hash32WithSalt` a1) as
+
+
+-- This is around 10% slower (which might just be alright!)
+hashLeftUnfoldedExtra = go
+    where go !h [] = h
+          -- go !h (a1:a2:a3:a4:a5:a6:a7:a8:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7 `hash32WithSalt` a8) as
+          -- go !h (a1:a2:a3:a4:a5:a6:a7:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7) as
+          -- This seems to be sweet spot on my machine:
+          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3 `hash32WithSaltExtra` a4 `hash32WithSaltExtra` a5 `hash32WithSaltExtra` a6) as
+          go !h (a1:a2:a3:a4:a5:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3 `hash32WithSaltExtra` a4 `hash32WithSaltExtra` a5) as
+          go !h (a1:a2:a3:a4:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3 `hash32WithSaltExtra` a4) as
+          go !h (a1:a2:a3:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3) as
+          go !h (a1:a2:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2) as
+          go !h (a1:as) = go (h `hash32WithSaltExtra` a1) as
+
+-- a fused foldl' equivalent -- NOTE ~ 2x faster than unfolded
+hashLeftNoList :: Word32 -> Word8 -> Word32
+hashLeftNoList = go
+    where go !h 0 = h
+          go !h !b = go (h `hash32WithSalt` b) (b-1)
+
+hashLeftUnfoldedNoList :: Word32 -> Word8 -> Word32
+hashLeftUnfoldedNoList = go
+    -- note: this only works for args divisible by 5
+    where go !h !b 
+            | b >= 5 = go (h `hash32WithSalt` b  `hash32WithSalt` (b-1)  `hash32WithSalt` (b-2)  `hash32WithSalt` (b-3)  `hash32WithSalt` (b-4)) (b-5) 
+            | b /= 0 = error "please call with arg divisible by 5"
+            | otherwise = h
+

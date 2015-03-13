@@ -405,22 +405,29 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 --   + fastest way to get access to bytes of integer types
 
 ---------------- LIST INSTANCE SCRATCH WORK:
--- overhead of doing an extra (* prime) at each recursive call:
--- hash32WithSaltExtra :: Word32 -> Word8 -> Word32   -- NO DIFFERENT
-hash32WithSaltExtra :: (Hashable a)=> Word32 -> a -> Word32
-{-# INLINE hash32WithSaltExtra #-}
-hash32WithSaltExtra h a = (h * fnvPrime32) `hash32WithSalt` a
 
--- testing. NOTE: we're omiting handling of empty vs. full list
-hashFoldl', hashFoldr, hashLeftUnfolded :: Word32 -> [Word8] -> Word32
-{-# INLINE hashFoldr #-}
-hashFoldr = foldr (\a h'-> h' `hash32WithSalt` a) -- NOTE: hashing backwards
 
--- USE THIS VERSION:
+-- testing. TODO NOTE: we're omiting handling of empty vs. full list, so these aren't valid yet! ------
+
+-- TODO more different benchmarks of different types of lists, and ways of
+-- constructing, and examine which of these two to use (and when):
+
+-- 7.10
+--   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  339.4 ns  !! MATCHING BASELINE
+--   APPLIED TO ([1.. 250 :: Word8])                  1.766 μs
+-- 7.8
+--   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  8.938 μs  -- NOTE: in general, 7.8 seems to do poorly applying folds to this in the context of criterion benchmarks
+--   APPLIED TO ([1.. 250 :: Word8])                  846.5 ns
+hashFoldl' :: Word32 -> [Word8] -> Word32
 {-# INLINE hashFoldl' #-}
 hashFoldl' = foldl' (\h' a-> h' `hash32WithSalt` a)
 
--- ELSE IF NO FUSION HAPPENS (TODO VERIFY THIS IS WHY ABOVE FAST) THEN REWRITE TO THIS VERSION:
+-- 7.10
+--   APPLIED TO ([1.. 250 :: Word8])                  675.6 ns
+-- 7.8
+--   APPLIED TO ([1.. 250 :: Word8])                  729.6 ns
+hashLeftUnfolded :: Word32 -> [Word8] -> Word32
+{-# INLINE hashLeftUnfolded #-}
 hashLeftUnfolded = go
     where go !h [] = h
           -- This seems to be sweet spot on my machine:
@@ -428,18 +435,9 @@ hashLeftUnfolded = go
           go !h (a1:as) = go (h `hash32WithSalt` a1) as
 
 
-
--- a fused foldl' equivalent -- NOTE ~ 2x faster than unfolded
+-- BASELINE: a fused foldl' equivalent -- NOTE ~ 2x faster than Unfolded on 7.10
 hashLeftNoList :: Word32 -> Word8 -> Word32
+{-# INLINE hashLeftNoList #-}
 hashLeftNoList = go
     where go !h 0 = h
           go !h !b = go (h `hash32WithSalt` b) (b-1)
-
-hashLeftUnfoldedNoList :: Word32 -> Word8 -> Word32
-hashLeftUnfoldedNoList = go
-    -- note: this only works for args divisible by 5
-    where go !h !b 
-            | b >= 5 = go (h `hash32WithSalt` b  `hash32WithSalt` (b-1)  `hash32WithSalt` (b-2)  `hash32WithSalt` (b-3)  `hash32WithSalt` (b-4)) (b-5) 
-            | b /= 0 = error "please call with arg divisible by 5"
-            | otherwise = h
-

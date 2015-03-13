@@ -412,48 +412,22 @@ hash32WithSaltExtra :: (Hashable a)=> Word32 -> a -> Word32
 hash32WithSaltExtra h a = (h * fnvPrime32) `hash32WithSalt` a
 
 -- testing. NOTE: we're omiting handling of empty vs. full list
-hashFoldl', hashFoldl'Extra, hashFoldr, hashFoldrExtra, hashLeftUnfolded, hashLeftUnfoldedExtra :: Word32 -> [Word8] -> Word32
+hashFoldl', hashFoldr, hashLeftUnfolded :: Word32 -> [Word8] -> Word32
 {-# INLINE hashFoldr #-}
-{-# INLINE hashFoldrExtra #-}
 hashFoldr = foldr (\a h'-> h' `hash32WithSalt` a) -- NOTE: hashing backwards
-hashFoldrExtra = foldr (\a h'-> h' `hash32WithSaltExtra` a) -- NOTE: hashing backwards
-
-
--- INSERTING A MULTIPLY BETWEEN EACH IS ~ 68% SLOWER
-{-# INLINE hashFoldl'Extra #-}
-hashFoldl'Extra = foldl' (\h' a-> h' `hash32WithSaltExtra` a) 
 
 -- USE THIS VERSION:
 {-# INLINE hashFoldl' #-}
 hashFoldl' = foldl' (\h' a-> h' `hash32WithSalt` a)
 
 -- ELSE IF NO FUSION HAPPENS (TODO VERIFY THIS IS WHY ABOVE FAST) THEN REWRITE TO THIS VERSION:
--- This is much faster:
 hashLeftUnfolded = go
     where go !h [] = h
-          -- go !h (a1:a2:a3:a4:a5:a6:a7:a8:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7 `hash32WithSalt` a8) as
-          -- go !h (a1:a2:a3:a4:a5:a6:a7:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7) as
           -- This seems to be sweet spot on my machine:
           go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6) as
-          go !h (a1:a2:a3:a4:a5:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5) as
-          go !h (a1:a2:a3:a4:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4) as
-          go !h (a1:a2:a3:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3) as
-          go !h (a1:a2:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2) as
           go !h (a1:as) = go (h `hash32WithSalt` a1) as
 
 
--- This is around 10% slower (which might just be alright!)
-hashLeftUnfoldedExtra = go
-    where go !h [] = h
-          -- go !h (a1:a2:a3:a4:a5:a6:a7:a8:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7 `hash32WithSalt` a8) as
-          -- go !h (a1:a2:a3:a4:a5:a6:a7:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6 `hash32WithSalt` a7) as
-          -- This seems to be sweet spot on my machine:
-          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3 `hash32WithSaltExtra` a4 `hash32WithSaltExtra` a5 `hash32WithSaltExtra` a6) as
-          go !h (a1:a2:a3:a4:a5:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3 `hash32WithSaltExtra` a4 `hash32WithSaltExtra` a5) as
-          go !h (a1:a2:a3:a4:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3 `hash32WithSaltExtra` a4) as
-          go !h (a1:a2:a3:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2 `hash32WithSaltExtra` a3) as
-          go !h (a1:a2:as) = go (h `hash32WithSaltExtra` a1 `hash32WithSaltExtra` a2) as
-          go !h (a1:as) = go (h `hash32WithSaltExtra` a1) as
 
 -- a fused foldl' equivalent -- NOTE ~ 2x faster than unfolded
 hashLeftNoList :: Word32 -> Word8 -> Word32

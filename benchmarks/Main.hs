@@ -82,10 +82,10 @@ main = do
             , bench "hashFoldl'" $ nf (hashFoldl' fnvOffsetBasis32) [1..sz]
             -- !!! As fast as hashLeftNoList -- TODO is there really a rule firing here?
             , bench "hashFoldl' trying to fuse" $ nf (\i-> hashFoldl' fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
-            , bench "hashFoldl'Extra trying to fuse" $ nf (\i-> hashFoldl'Extra fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
+            -- adding extra multiply adds ~ 65% overhead!:
+          --, bench "hashFoldl'Extra trying to fuse" $ nf (\i-> hashFoldl'Extra fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             -- Faster than un-fused (I think that's what's happening) fold-based code:
             , bench "hashLeftUnfolded" $ nf (hashLeftUnfolded fnvOffsetBasis32) [1..sz]
-            , bench "hashLeftUnfoldedExtra" $ nf (hashLeftUnfoldedExtra fnvOffsetBasis32) [1..sz]
             ]
     defaultMain [ 
         bench "bytes32" $ nf bytes32 0x66666666

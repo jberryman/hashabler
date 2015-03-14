@@ -138,6 +138,11 @@ hash32Word64 wd = case bytes64_alt wd of
 -- EXTRACTING BYTES FROM DIFFERENT TYPES ----------------------------
 -- NOTE we're to hash the resulting Word8s from left to right
 
+bytes16 :: Word16 -> (Word8, Word8)
+{-# INLINE bytes16 #-}
+bytes16 wd = (shifted 8, fromIntegral wd)
+     where shifted = fromIntegral . unsafeShiftR wd
+
 bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 {-# INLINE bytes32 #-}
 bytes32 wd = (shifted 24, shifted 16, shifted 8, fromIntegral wd)
@@ -214,7 +219,7 @@ class Hashable a where
     -- TODO
     -- | Produce a 64-bit hash value using the supplied seed. The seed should
     -- be non-zero although this is not checked.
-    -- hash64WithSalt :: Word64 -> a -> Word64
+  --hash64WithSalt :: Word64 -> a -> Word64
 
     -- NOTE: these are just here so we can override them with faster
     -- implementations, and pre-computed bits.
@@ -224,12 +229,12 @@ class Hashable a where
     -- > hash32 = hash32WithSalt 2166136261
     hash32 :: Hashable a=> a -> Word32
     {-# INLINE hash32 #-}
-    hash32 = hash32WithSalt fnvOffsetBasis32
+    hash32 a = hash32WithSalt fnvOffsetBasis32 a
     
     -- TODO
     -- hash64 :: Hashable a=> a -> Word64
-    -- {-# INLINE hash64 #-}
-    -- hash64 = hash64WithSalt fnvOffsetBasis64
+  --{-# INLINE hash64 #-}
+  --hash64 a = hash64WithSalt fnvOffsetBasis64 a
 
 -- ---------
 -- Instances that ought to match the test vectors from the spec!
@@ -261,35 +266,23 @@ instance Hashable Char where -- maxbound is 1114111 (~21 bits), `ord :: Char -> 
     -- TODO pre-hash all but last 3 bytes.
 
 
--- TODO use decodeFloat_ / decodeDouble_ from Prim to extract bits?
---      or decodeFloat from RealFloat
---         good for Float (calls decodeFloat_Int)
---         BAD for Double (I think)
---      or toRational, then convert Integers?
-
--- TODO OR USE TUPLE INSTANCES HERE?
-
 -- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly
--- slow; complain here: http://hackage.haskell.org/trac/ghc/ticket/4092
+-- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Float where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed x = assert (isIEEE x) $
-     case bytesFloat x of 
-          (b0,b1,b2,b3)->
-            seed <# b0 <# b1 <# b2 <# b3
+        hash32WithSalt seed $ bytesFloat x
 
 -- | Hash a Double as IEEE 754 double-precision format bytes. This is terribly
--- slow; complain here: http://hackage.haskell.org/trac/ghc/ticket/4092
+-- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Double where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed x = assert (isIEEE x) $
-     case bytesDouble x of 
-          (b0,b1,b2,b3,b4,b5,b6,b7) ->
-            seed <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
+        hash32WithSalt seed $ bytesDouble x
 
 
 -- GHC uses two's complement representation for signed ints; C has this
--- undefined; just cast to Word and hash.
+-- undefined, I guess; just cast to Word and hash.
 
 instance Hashable Int8 where
     {-# INLINE hash32WithSalt #-}
@@ -309,29 +302,22 @@ instance Hashable Int64 where
 
 -- Straightforward hashing of different Words and byte arrays:
 
--- TODO OR USE TUPLE INSTANCES HERE?
 instance Hashable Word8 where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt = (<#)
 
 instance Hashable Word16 where
     {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed wd = case (fromIntegral $ unsafeShiftR wd 8, fromIntegral wd) of 
-      (b0,b1)->
-        seed <# b0 <# b1
+    hash32WithSalt seed = hash32WithSalt seed . bytes16
 
 instance Hashable Word32 where
     {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed wd = case bytes32 wd of 
-      (b0,b1,b2,b3)->
-        seed <# b0 <# b1 <# b2 <# b3
+    hash32WithSalt seed = hash32WithSalt seed . bytes32
 
 instance Hashable Word64 where
     {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed wd = case bytes64_alt wd of
- -- hash32WithSalt seed wd = case bytes64 wd of     -- TODO CONDITIONAL on arch
-      (b0,b1,b2,b3,b4,b5,b6,b7) ->
-        seed <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
+    hash32WithSalt seed = hash32WithSalt seed . bytes64_alt    -- TODO CONDITIONAL on arch
+
 {-
 instance Hashable S.ByteString where
 instance Hashable L.ByteString where
@@ -360,33 +346,34 @@ instance (Hashable a, Hashable b) => Hashable (Either a b) where
 -}
 
 -- TUPLES:
--- TODO hmmmm, but we'd probably like tuples of Word8 to simply hash up the words together, no?
---      if so, then do we need the extra method trick?
---      OR: - add a method:
---              combine :: Hashable a=> Hash32 -> a -> Hash32
---              -... wait... do we even need that?
---              if not TODO rename seed -> "hash" and add newtype wrapper.
---          - and/or create a newtype wrapper for hash values
---
--- NOTES FOR DOCUMENTATION
---   sum types must mix in a byte indicating the constructor
---     this should be numbered from 1 ascending (but what about > 255 constructor types??)
---   variable-length types (arrays) should also be "completed" with a byte
---   TODO can this safely come at the end? I THINK SO
---        but what about recursive sum types (lists!) ?
---          we don't want (I think) to hash an extra bite at each (:) level! So what's the rule?
 
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed (a,b) = seed `hash32WithSalt` a `hash32WithSalt` b
     
-{-
 instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b,c) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c
+
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4) => Hashable (a1, a2, a3, a4) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b,c,d) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d
+
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5) => Hashable (a1, a2, a3, a4, a5) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b,c,d,e) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e
+
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6) => Hashable (a1, a2, a3, a4, a5, a6) where
-instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7) => Hashable (a1, a2, a3, a4, a5, a6, a where
--}
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b,c,d,e,f) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e `hash32WithSalt` f
+
+instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7) => Hashable (a1, a2, a3, a4, a5, a6, a7) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b,c,d,e,f,g) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e `hash32WithSalt` f `hash32WithSalt` g
+
+instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7, Hashable a8) => Hashable (a1, a2, a3, a4, a5, a6, a7, a8) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed (a,b,c,d,e,f,g,h) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e `hash32WithSalt` f `hash32WithSalt` g `hash32WithSalt` h
 
 -- NOTES:
 --   - no overhead from fromIntegral

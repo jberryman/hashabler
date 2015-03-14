@@ -1,6 +1,56 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 module Data.Hashable.FNV1a 
+
+-- ** Defining principled Hashable instances
+{- | 
+ Special care needs to be taken when defining instances of Hashable for your
+ own types, especially for recursive types and types with multiple
+ constructors. First instances need to ensure that *distinct values produce
+ distinct hash values*. Here's an example of a *bad* implementation for 'Maybe':
+ .
+ > instance (Hashable a)=> Hashable (Maybe a) where              -- BAD!
+ >     hash32WithSalt h (Just a) = h `hash32WithSalt` a          -- BAD!
+ >     hash32WithSalt h Nothing  = h `hash32WithSalt` (1::Word8) -- BAD!
+ .
+ Here @Just (1::Word8)@ hashes to the same value as @Nothing@. TODO mention how we only can make those two assumptions about @a@ here
+ .
+ Second and more tricky, instances should not permit a function 
+ @f :: a -> (a,a)@ such that 
+ @x `hash` y == x `hash` y1 `hash` y2 where (y1,y2) = f y@... or something.
+ The idea is we want to avoid the following kinds of collisions:
+ .
+ > hash [Just 1, Nothing] == hash [Just 1]     -- BAD!
+ > hash ([1,2], [3])      == hash ([1], [2,3]  -- BAD!)
+ .
+ Maybe what we mean is that where @a@ is a 'Monoid', we expect replacing
+ `mappend` with the hash operation to always yield *different* values. This
+ needs clarifying; please help.
+ .
+ Here are a few rules of thumb which should result in principled instances for
+ your own types (This is a work-in-progress; please help):
+ .
+ - If all values of a type have a static structure, i.e. the arrangement and
+   number of child parts to be hashed is knowable from the type, then one may
+   simply hash each child element of the type in turn. This is the case for
+   product types like tuples (where the arity is reflected in the type), or
+   primitive numeric values composed of a static number of bits.
+ . 
+ Otherwise if the type has variable structure, e.g. if it has multiple
+ constructors or is an array type...
+ .
+ - Every possible value of a type should inject at least one byte of entropy
+   *apart* from any recursive calls to child elements; we can ensure this is
+   the case by hashing an initial or final distinct byte for each distinct
+   constructor of our type
+ .
+ A final important note: we're not concerned with collisions between values of
+ *different types*, even if those values are in some way "similar". This also
+ means instances cannot rely on the hashing of child elements being
+ uncorrelated. That might be one interpretation of the mistake in our faulty
+ @Maybe@ instance above
+ -}
+ -- *** TODO notes on Generic deriving
     where
     
 import Data.Word
@@ -143,16 +193,19 @@ cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
 
 
--- TODO MAYBE rename these methods:
+-- TODO rename these methods:
+--        - call it "combine" or "hashedWith" or "hasingIn"
 --        - possibly use (<#) operator
 --        - mention that we're "mixing right hand data into left-hand side hash"
 
 -- | A class of types that can be converted into a hash value. For relevant
 -- instances of primitive types, we expect 'hash32' and 'hash64' to produce
 -- values following the FNV1a spec. We expect all other instances to display
--- "good" hashing properties (w/r/t avalanche, bit indepepndence, etc.) where
+-- "good" hashing properties (w/r/t avalanche, bit independence, etc.) where
 -- "good" is only evidenced by our test suite, for now.
--- TODO revise this in light of what we actual get from test vectors.
+--
+-- See the section "Defining Hashable instances" for details of what we expect
+-- from instances.
 class Hashable a where
     -- | Produce a 32-bit hash value using the supplied seed. The seed should
     -- be non-zero although this is not checked.
@@ -293,6 +346,7 @@ instance Hashable L.Text where
 
 instance Hashable Integer where
     -- GHC.Integer.GMP.Internals from integer-gmp (part of GHC distribution)
+    -- TODO be careful that Eq values hash to the same!
 instance (Integral a, Hashable a) => Hashable (Ratio a) where
 instance Hashable Ordering where
 instance Hashable () where
@@ -325,8 +379,6 @@ instance (Hashable a, Hashable b) => Hashable (Either a b) where
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed (a,b) = seed `hash32WithSalt` a `hash32WithSalt` b
-    -- TODO: SHIT! but what if a and b are, e.g. [Word8]
-    --       we get into false identical hashes!
     
 {-
 instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
@@ -411,6 +463,8 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 
 -- TODO more different benchmarks of different types of lists, and ways of
 -- constructing, and examine which of these two to use (and when):
+--   We might be able to NOINLINE hashLeftUnfolded version (if performance
+--   unaffected), and then re-write to hashFoldl' version based on argument
 
 -- 7.10
 --   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  339.4 ns  !! MATCHING BASELINE

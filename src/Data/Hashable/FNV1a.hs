@@ -507,73 +507,39 @@ hashLeftNoList = go
 
 
 -- benchmark fetching bytes from bytestring in different ways -----------
--- TODO make sure to test on bytestrings where off /= 0
-
--- TODO NOW WITH THE ACTUAL HASHING ALGORITHM:
-hashBytesEach :: Word32 -> B.ByteString -> IO Word32
-{-# INLINE hashBytesEach #-}
-hashBytesEach h (B.PS fp off len) =
-      withForeignPtr fp $ \base -> do
-        let ixFinal = off+len-1
-            hashLoop !hAcc !ix 
-                | ix > ixFinal  = return hAcc 
-                | otherwise     = assert (ix <= ixFinal) $ do
-                    byt <- peekByteOff base ix
-                    hashLoop (hAcc <# byt) (ix+1)
-        hashLoop h off 
+-- TODO TESTING make sure to test on bytestrings where off /= 0
 
 
--- TODO Change this to Word, and make arch conditional:
--- grouped by Word32 Storable peek
-hashBytesWord32 :: Word32 -> B.ByteString -> IO Word32
-{-# INLINE hashBytesWord32 #-}
-hashBytesWord32 h (B.PS fp off lenBytes) =
-      withForeignPtr fp $ \base -> do
-        let !bytesRem = lenBytes .&. 3  -- `mod` 4  -- TODO sizeOf Word32 - 1
-            -- index where we begin to read bytesRem individual bytes:
-            !bytesIx = off+lenBytes-bytesRem
-            !ixFinal = off+lenBytes-1
-
-            hashWord32Loop !hAcc !ix 
-                | ix == bytesIx = hashBytesLoop hAcc bytesIx
-                | otherwise     = assert (ix < bytesIx) $ do
-                    wd32 <- peekByteOff base ix
-                    let (b0,b1,b2,b3) = bytes32 wd32
-                    hashWord32Loop (hAcc <# b0 <# b1 <# b2 <# b3) (ix+4) -- TODO sizeOf Word32
-            
-            -- TODO we could also unroll this for 0,1,2,3
-            hashBytesLoop !hAcc !ix 
-                | ix > ixFinal  = return hAcc 
-                | otherwise     = assert (ix <= ixFinal) $ do
-                    byt <- peekByteOff base ix
-                    hashBytesLoop (hAcc <# byt) (ix+1)
-
-        hashWord32Loop h off 
-
--- Doing two Word32 peeks at a time:
-hashBytesWord32x2 :: Word32 -> B.ByteString -> IO Word32
+-- Doing two Word32 peeks at a time is ~10% faster than one Word32 peek on
+-- 32-bit arch, which is ~twice as fast as individual byte peeks.
+hashBytesWord32x2 :: Word32 -> B.ByteString -> Word32
 {-# INLINE hashBytesWord32x2 #-}
-hashBytesWord32x2 h (B.PS fp off lenBytes) =
+hashBytesWord32x2 h (B.PS fp off lenBytes) = B.inlinePerformIO $
       withForeignPtr fp $ \base -> do
-        let !bytesRem = lenBytes .&. 7  -- `mod` 4  -- TODO sizeOf Word32*2 - 1
+        let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
             -- index where we begin to read bytesRem individual bytes:
             !bytesIx = off+lenBytes-bytesRem
             !ixFinal = off+lenBytes-1
 
-            hashWord32Loop !hAcc !ix 
-                | ix == bytesIx = hashBytesLoop hAcc bytesIx
+            hash8ByteLoop !hAcc !ix 
+                | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
+                    -- TODO IFDEF on 32-bit arch
                     wd32_a <- peekByteOff base ix
-                    wd32_b <- peekByteOff base (ix+4) -- TODO sizeOf Word32
+                    wd32_b <- peekByteOff base (ix + 4)
                     let (b0,b1,b2,b3) = bytes32 wd32_a
                     let (b4,b5,b6,b7) = bytes32 wd32_b
-                    hashWord32Loop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix+8) -- TODO sizeOf Word32*2
+                    -- TODO ELSE on 64-bit arch
+                 -- wd64 <- peekByteOff base ix
+                 -- let (b0,b1,b2,b3,b4,b5,b6,b7) = bytes64 wd64
+                    -- TODO ENDIF
+                    hash8ByteLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 8)
             
-            -- TODO we could also unroll this for 0,1,2,3
-            hashBytesLoop !hAcc !ix 
+            -- TODO we could unroll this for [0..7]
+            hashRemainingBytes !hAcc !ix 
                 | ix > ixFinal  = return hAcc 
                 | otherwise     = assert (ix <= ixFinal) $ do
                     byt <- peekByteOff base ix
-                    hashBytesLoop (hAcc <# byt) (ix+1)
+                    hashRemainingBytes (hAcc <# byt) (ix+1)
 
-        hashWord32Loop h off 
+        hash8ByteLoop h off 

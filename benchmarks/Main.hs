@@ -95,14 +95,7 @@ main = do
           --, bench "hashLeftUnfolded trying to fuse" $ nf (\i-> hashLeftUnfolded fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             ]
     let bgroupBytestring sz bs = bgroup ("bytestrings "++show sz) $ [
-                bench "hashBytesEach 50" $ nfIO $ hashBytesEach fnvOffsetBasis32 bs 
-              , bench "hashBytesWord32 50" $ nfIO $ hashBytesWord32 fnvOffsetBasis32 bs 
-              , bench "hashBytesWord32x2 50" $ nfIO $ hashBytesWord32x2 fnvOffsetBasis32 bs 
-              {- Approx the same:
-              , bench "inlinePerformIO hashBytesEach 50" $ nf (B.inlinePerformIO . hashBytesEach fnvOffsetBasis32) bs 
-              , bench "inlinePerformIO hashBytesWord32 50" $ nf (B.inlinePerformIO . hashBytesWord32 fnvOffsetBasis32) bs 
-              , bench "inlinePerformIO hashBytesWord32x2 50" $ nf (B.inlinePerformIO . hashBytesWord32x2 fnvOffsetBasis32) bs 
-              -}
+                bench "hashBytesWord32x2" $ nf (hashBytesWord32x2 fnvOffsetBasis32) bs 
               ]
     defaultMain [ 
         bgroupBytestring 50 bs50

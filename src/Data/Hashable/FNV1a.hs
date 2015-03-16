@@ -58,6 +58,17 @@ import Data.Int
 import Data.Bits
 import Data.Char
 import Data.List
+
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Internal as B
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Short as BSh -- TODO conditional
+import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Storable (peekByteOff)
+import Foreign.Ptr (plusPtr)
+
 import Control.Exception(assert)
 
 -- For casting of floating point values:
@@ -112,9 +123,10 @@ infixl <#
 -- TODO 64-bit hashing
 
 
+
 -- UNROLLED 32-BIT HASHING OF DIFFERENT TYPES: ----------------------
 
--- TODO BENCHMARK hash32WithSalt against these and probably remove:
+-- TODO BENCHMARK hash32WithSalt against these and remove:
 hash32Word16 :: Word16 -> Word32
 {-# INLINE hash32Word16 #-}
 hash32Word16 wd = case (fromIntegral $ unsafeShiftR wd 8, fromIntegral wd) of 
@@ -199,6 +211,7 @@ cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
 
 
 -- TODO rename these methods:
+--        - rename seed -> hash, and use a newtype wrapper
 --        - call it "combine" or "hashedWith" or "hasingIn"
 --        - possibly use (<#) operator
 --        - mention that we're "mixing right hand data into left-hand side hash"
@@ -247,7 +260,7 @@ instance Hashable Bool where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed b
        | b         = hash32WithSalt seed (1::Word8) 
-       | otherwise = hash32WithSalt seed (0::Word8)
+       | otherwise = hash32WithSalt seed (0::Word8) -- TODO we could omit the xor here.
 
     {-# INLINE hash32 #-}
     hash32 b = 
@@ -318,13 +331,23 @@ instance Hashable Word64 where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = hash32WithSalt seed . bytes64_alt    -- TODO CONDITIONAL on arch
 
-{-
-instance Hashable S.ByteString where
-instance Hashable L.ByteString where
-instance Hashable ShortByteString where
-instance Hashable S.Text where
-instance Hashable L.Text where
+-- THESE HAVE VARIABLE LENGTH, and require:
+mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrememting.
+               -> Word32 -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
+               -> Word32 -- ^ New hash value
+mixConstructor n h = h `hash32WithSalt` (0xFF - n)
 
+instance Hashable B.ByteString where
+    hash32WithSalt seed (B.PS fp off len) = B.inlinePerformIO $ 
+      withForeignPtr fp $ \base -> do undefined
+instance Hashable BL.ByteString where
+instance Hashable BSh.ShortByteString where
+instance Hashable T.Text where
+instance Hashable TL.Text where
+
+instance Hashable a => Hashable [a] where
+
+{-
 -- ---------
 -- These ought to hash in some reasonable and good way. Recursive instances
 -- ought to be defined in terms of hash*WithSalt on subterms; this should
@@ -340,7 +363,6 @@ instance Hashable ThreadId where
 instance Hashable TypeRep where
 instance Hashable (StableName a) where
 
-instance Hashable a => Hashable [a] where
 instance Hashable a => Hashable (Maybe a) where
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
 -}
@@ -482,3 +504,76 @@ hashLeftNoList :: Word32 -> Word8 -> Word32
 hashLeftNoList = go
     where go !h 0 = h
           go !h !b = go (h `hash32WithSalt` b) (b-1)
+
+
+-- benchmark fetching bytes from bytestring in different ways -----------
+-- TODO make sure to test on bytestrings where off /= 0
+
+-- TODO NOW WITH THE ACTUAL HASHING ALGORITHM:
+hashBytesEach :: Word32 -> B.ByteString -> IO Word32
+{-# INLINE hashBytesEach #-}
+hashBytesEach h (B.PS fp off len) =
+      withForeignPtr fp $ \base -> do
+        let ixFinal = off+len-1
+            hashLoop !hAcc !ix 
+                | ix > ixFinal  = return hAcc 
+                | otherwise     = assert (ix <= ixFinal) $ do
+                    byt <- peekByteOff base ix
+                    hashLoop (hAcc <# byt) (ix+1)
+        hashLoop h off 
+
+
+-- TODO Change this to Word, and make arch conditional:
+-- grouped by Word32 Storable peek
+hashBytesWord32 :: Word32 -> B.ByteString -> IO Word32
+{-# INLINE hashBytesWord32 #-}
+hashBytesWord32 h (B.PS fp off lenBytes) =
+      withForeignPtr fp $ \base -> do
+        let !bytesRem = lenBytes .&. 3  -- `mod` 4  -- TODO sizeOf Word32 - 1
+            -- index where we begin to read bytesRem individual bytes:
+            !bytesIx = off+lenBytes-bytesRem
+            !ixFinal = off+lenBytes-1
+
+            hashWord32Loop !hAcc !ix 
+                | ix == bytesIx = hashBytesLoop hAcc bytesIx
+                | otherwise     = assert (ix < bytesIx) $ do
+                    wd32 <- peekByteOff base ix
+                    let (b0,b1,b2,b3) = bytes32 wd32
+                    hashWord32Loop (hAcc <# b0 <# b1 <# b2 <# b3) (ix+4) -- TODO sizeOf Word32
+            
+            -- TODO we could also unroll this for 0,1,2,3
+            hashBytesLoop !hAcc !ix 
+                | ix > ixFinal  = return hAcc 
+                | otherwise     = assert (ix <= ixFinal) $ do
+                    byt <- peekByteOff base ix
+                    hashBytesLoop (hAcc <# byt) (ix+1)
+
+        hashWord32Loop h off 
+
+-- Doing two Word32 peeks at a time:
+hashBytesWord32x2 :: Word32 -> B.ByteString -> IO Word32
+{-# INLINE hashBytesWord32x2 #-}
+hashBytesWord32x2 h (B.PS fp off lenBytes) =
+      withForeignPtr fp $ \base -> do
+        let !bytesRem = lenBytes .&. 7  -- `mod` 4  -- TODO sizeOf Word32*2 - 1
+            -- index where we begin to read bytesRem individual bytes:
+            !bytesIx = off+lenBytes-bytesRem
+            !ixFinal = off+lenBytes-1
+
+            hashWord32Loop !hAcc !ix 
+                | ix == bytesIx = hashBytesLoop hAcc bytesIx
+                | otherwise     = assert (ix < bytesIx) $ do
+                    wd32_a <- peekByteOff base ix
+                    wd32_b <- peekByteOff base (ix+4) -- TODO sizeOf Word32
+                    let (b0,b1,b2,b3) = bytes32 wd32_a
+                    let (b4,b5,b6,b7) = bytes32 wd32_b
+                    hashWord32Loop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix+8) -- TODO sizeOf Word32*2
+            
+            -- TODO we could also unroll this for 0,1,2,3
+            hashBytesLoop !hAcc !ix 
+                | ix > ixFinal  = return hAcc 
+                | otherwise     = assert (ix <= ixFinal) $ do
+                    byt <- peekByteOff base ix
+                    hashBytesLoop (hAcc <# byt) (ix+1)
+
+        hashWord32Loop h off 

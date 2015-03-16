@@ -32,6 +32,8 @@ import Foreign.Storable
 
 import Data.List
 
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Internal as B
 
 instance (NFData a, NFData b)=> NFData (LargeKey a b)
 deriving instance Generic (LargeKey a b)
@@ -64,6 +66,9 @@ main = do
         !w64 = force maxBound :: Word64
         !w64prime = force 1099511628211 :: Word64
 
+    let bs50 = B.pack $ replicate 50 1
+    let bs1000 = B.pack $ replicate 1000 1
+
     -- LISTS INSTANCES SCRATCH:
       -- Significantly slower than unfolded:
       -- , bench "hashFoldl'" $ nf (hashFoldl' fnvOffsetBasis32) [1..250]
@@ -89,8 +94,31 @@ main = do
             , bench "hashLeftUnfolded" $ nf (hashLeftUnfolded fnvOffsetBasis32) [1..sz]
           --, bench "hashLeftUnfolded trying to fuse" $ nf (\i-> hashLeftUnfolded fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             ]
+    let bgroupBytestring sz bs = bgroup ("bytestrings "++show sz) $ [
+                bench "hashBytesEach 50" $ nfIO $ hashBytesEach fnvOffsetBasis32 bs 
+              , bench "hashBytesWord32 50" $ nfIO $ hashBytesWord32 fnvOffsetBasis32 bs 
+              , bench "hashBytesWord32x2 50" $ nfIO $ hashBytesWord32x2 fnvOffsetBasis32 bs 
+              {- Approx the same:
+              , bench "inlinePerformIO hashBytesEach 50" $ nf (B.inlinePerformIO . hashBytesEach fnvOffsetBasis32) bs 
+              , bench "inlinePerformIO hashBytesWord32 50" $ nf (B.inlinePerformIO . hashBytesWord32 fnvOffsetBasis32) bs 
+              , bench "inlinePerformIO hashBytesWord32x2 50" $ nf (B.inlinePerformIO . hashBytesWord32x2 fnvOffsetBasis32) bs 
+              -}
+              ]
     defaultMain [ 
-        bench "bytes32" $ nf bytes32 0x66666666
+        bgroupBytestring 50 bs50
+      , bgroupBytestring 1000 bs1000
+
+      , bench "bytes32" $ nf bytes32 0x66666666
+
+      , bench "hash32 (Float)" $ nf hash32 (1.11111 :: Float)
+      , bench "hash32 (Double)" $ nf hash32 (1.111111111111 :: Double)
+      , bench "bytesFloat" $ nf bytesFloat (1.11111)
+      , bench "bytesDouble" $ nf bytesDouble (1.111111111111)
+      , bench "baseline bytes (deepseq'd)" $ nf (\x-> x) bytes4
+
+      , bench "hash32 (Word16)" $ nf hash32 (0x6666 :: Word16)
+      , bench "testWord w/ helper 32" $ nf hash32Word32 0x66666666
+      , bench "hash32 (Word32)" $ nf hash32 (0x66666666 :: Word32)
         
       , listBgroup "medium-size lists" 250
       -- In line with above, although NoList variants win out by a greater margin:
@@ -108,10 +136,6 @@ main = do
       , bench "baseline Word32" $ nf (\x-> x) (111 :: Word32)
       , bench "doubleToWord" $ nf doubleToWord 1.111111111111
       , bench "baseline Word64" $ nf (\x-> x)  (111 :: Word64)
-
-      , bench "bytesFloat" $ nf bytesFloat (1.11111)
-      , bench "bytesDouble" $ nf bytesDouble (1.111111111111)
-      , bench "baseline bytes (deepseq'd)" $ nf (\x-> x) bytes4
 
       {- Also really fucking slow
       , bench "decodeFloat" $ nf decodeFloat (1.11111 :: Float)

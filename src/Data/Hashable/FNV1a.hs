@@ -514,7 +514,7 @@ hashLeftNoList = go
 -- 32-bit arch, which is ~twice as fast as individual byte peeks.
 hashBytesWord32x2 :: Word32 -> B.ByteString -> Word32
 {-# INLINE hashBytesWord32x2 #-}
-hashBytesWord32x2 h (B.PS fp off lenBytes) = B.inlinePerformIO $
+hashBytesWord32x2 h = \(B.PS fp off lenBytes) -> B.inlinePerformIO $
       withForeignPtr fp $ \base -> do
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
             -- index where we begin to read bytesRem individual bytes:

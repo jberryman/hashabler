@@ -21,6 +21,7 @@ library
   exposed-modules:     Data.Hashable.FNV1a
   -- other-modules:       
   -- other-extensions:    
+                     -- TODO fix base constraint; needs to be at least 4.3 (for sizeofByteArray)
   build-depends:       base >=4.7 && <5
                      , array
                      , bytestring
@@ -36,7 +37,7 @@ benchmark bench
   main-is:        Main.hs
   ghc-options:    -Wall -O2 -threaded -funbox-strict-fields
   hs-source-dirs: benchmarks
-  build-depends:       base >=4.7 && <5
+  build-depends:       base
                      , criterion
                      , hashable-fnv1a
                      , bytestring

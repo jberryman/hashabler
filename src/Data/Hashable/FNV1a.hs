@@ -1,5 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE CPP #-}
 module Data.Hashable.FNV1a 
 
 -- ** Defining principled Hashable instances
@@ -52,7 +53,9 @@ module Data.Hashable.FNV1a
  -}
  -- *** TODO notes on Generic deriving
     where
-    
+
+-- TODO note copy-pasta and thanks to Tibbe & Hashable
+
 import Data.Word
 import Data.Int
 import Data.Bits
@@ -62,7 +65,9 @@ import Data.List
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
 import qualified Data.ByteString.Lazy.Internal as BL (foldlChunks, ByteString)
-import qualified Data.ByteString.Short as BSh -- TODO conditional
+#if MIN_VERSION_bytestring(0,10,4)
+import qualified Data.ByteString.Short.Internal as BSh
+#endif
 import qualified Data.Text as T
 import qualified Data.Text.Internal as T
 import qualified Data.Text.Array as T (Array(..))
@@ -354,7 +359,19 @@ instance Hashable BL.ByteString where
     hash32WithSalt seed = mixConstructor 0 .
         BL.foldlChunks hashBytesUnrolled64 seed
 
+#if MIN_VERSION_bytestring(0,10,4)
+-- | NOTE: hidden on bytestring < v0.10.4
 instance Hashable BSh.ShortByteString where
+    hash32WithSalt seed  = 
+#if MIN_VERSION_base(4,3,0)
+      \(BSh.SBS ba_) ->
+#else
+      \(BSh.SBS ba_ _) ->
+#endif
+        let ba = P.ByteArray ba_
+         in mixConstructor 0 $
+              hashByteArray seed 0 (P.sizeofByteArray ba) ba
+#endif
 
 -- | Strict @Text@
 instance Hashable T.Text where
@@ -509,6 +526,9 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 -- constructing, and examine which of these two to use (and when):
 --   We might be able to NOINLINE hashLeftUnfolded version (if performance
 --   unaffected), and then re-write to hashFoldl' version based on argument
+--   TODO :
+--     or use our own rules so that we can get both fusion and unrolling?
+--     (or would that not be helpful, since values already in a register?)
 
 -- 7.10
 --   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  339.4 ns  !! MATCHING BASELINE

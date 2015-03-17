@@ -41,6 +41,7 @@ benchmark bench
                      , hashable-fnv1a
                      , bytestring
                      , text
+                     , primitive
                      -- Just Testing:
                      , ghc
                      , deepseq

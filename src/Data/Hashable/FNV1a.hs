@@ -335,25 +335,38 @@ instance Hashable Word64 where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = hash32WithSalt seed . bytes64_alt    -- TODO CONDITIONAL on arch
 
--- THESE HAVE VARIABLE LENGTH, and require:
-mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrememting.
+-- THESE HAVE VARIABLE LENGTH, and require:  ------------------------
+mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
                -> Word32 -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
                -> Word32 -- ^ New hash value
 mixConstructor n h = h `hash32WithSalt` (0xFF - n)
 
 instance Hashable B.ByteString where
-    hash32WithSalt seed (B.PS fp off len) = B.inlinePerformIO $ 
-      withForeignPtr fp $ \base -> do undefined
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = mixConstructor 0 .
+        hashBytesUnrolled64 seed
+
 instance Hashable BL.ByteString where
 instance Hashable BSh.ShortByteString where
+
 instance Hashable T.Text where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = mixConstructor 0 .
+        hashText seed
+
 instance Hashable TL.Text where
+
 -- | Here we hash each byte of the array in turn. Depending on the size and
 -- alignment of data stored, this might include padding bytes and might result
 -- in a different value across different architectures.
 instance Hashable P.ByteArray where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = \ba-> mixConstructor 0 $
+        hashByteArray seed 0 (P.sizeofByteArray ba) ba
 
 instance Hashable a => Hashable [a] where
+
+-- ------------------------------------------------------------------
 
 {-
 -- ---------
@@ -556,6 +569,7 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> B.inlinePerformIO $
 
 
 -- TODO TESTING, quickcheck against hashBytesUnrolled64
+--      TESTING, make sure we use characters of variable width. 
 hashText :: Word32 -> T.Text -> Word32
 {-# INLINE hashText #-}
 hashText h = \(T.Text (T.Array ba_) off16 len16) -> 

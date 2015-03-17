@@ -35,6 +35,7 @@ import Data.List
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
 import qualified Data.Text as T
+import qualified Data.Primitive as P
 
 instance (NFData a, NFData b)=> NFData (LargeKey a b)
 deriving instance Generic (LargeKey a b)
@@ -71,6 +72,7 @@ main = do
         bs1000 = B.pack $ replicate 1000 1
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
         t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
+    ba50 <- P.newByteArray 50 >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
 
     -- LISTS INSTANCES SCRATCH:
       -- Significantly slower than unfolded:
@@ -99,8 +101,14 @@ main = do
             ]
     defaultMain [ 
         bench "hashBytesUnrolled64 (50)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs50 
+      -- ought to be same as above:
+      , bench "hash32WithSalt (50) (using hashBytesUnrolled64)" $ nf (hash32WithSalt fnvOffsetBasis32) bs50 
       , bench "hashBytesUnrolled64 (1000)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs1000
       , bench "hashText (50)" $ nf (hashText fnvOffsetBasis32) t50
+      -- ought to be same as above:
+      , bench "hash32WithSalt (50) (using hashText)" $ nf (hash32WithSalt fnvOffsetBasis32) t50
+      -- also ought to be same as above:
+      , bench "hash32WithSalt (ByteArray, 50)" $ nf (hash32WithSalt fnvOffsetBasis32) ba50
       , bench "hashText (1000)" $ nf (hashText fnvOffsetBasis32) t1000
 
       , bench "bytes32" $ nf bytes32 0x66666666

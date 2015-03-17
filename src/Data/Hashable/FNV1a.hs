@@ -61,14 +61,14 @@ import Data.List
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
-import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Lazy.Internal as BL (foldlChunks, ByteString)
 import qualified Data.ByteString.Short as BSh -- TODO conditional
 import qualified Data.Text as T
 import qualified Data.Text.Internal as T
 import qualified Data.Text.Array as T (Array(..))
 import qualified Data.Primitive as P
 import qualified Data.Primitive.ByteArray as P (indexByteArray,ByteArray(..))
-import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Lazy.Internal as TL (foldlChunks, Text)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
 import Foreign.Ptr (plusPtr)
@@ -341,20 +341,33 @@ mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and 
                -> Word32 -- ^ New hash value
 mixConstructor n h = h `hash32WithSalt` (0xFF - n)
 
+-- | Strict @ByteString@
 instance Hashable B.ByteString where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = mixConstructor 0 .
         hashBytesUnrolled64 seed
 
+-- TODO benchmarks for fusion:
+-- | Lazy @ByteString@
 instance Hashable BL.ByteString where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = mixConstructor 0 .
+        BL.foldlChunks hashBytesUnrolled64 seed
+
 instance Hashable BSh.ShortByteString where
 
+-- | Strict @Text@
 instance Hashable T.Text where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = mixConstructor 0 .
         hashText seed
 
+-- TODO benchmarks for fusion:
+-- | Lazy @Text@
 instance Hashable TL.Text where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = mixConstructor 0 .
+        TL.foldlChunks hashText seed
 
 -- | Here we hash each byte of the array in turn. Depending on the size and
 -- alignment of data stored, this might include padding bytes and might result

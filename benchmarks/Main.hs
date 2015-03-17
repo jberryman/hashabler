@@ -34,6 +34,7 @@ import Data.List
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
+import qualified Data.Text as T
 
 instance (NFData a, NFData b)=> NFData (LargeKey a b)
 deriving instance Generic (LargeKey a b)
@@ -67,7 +68,9 @@ main = do
         !w64prime = force 1099511628211 :: Word64
 
     let bs50 = B.pack $ replicate 50 1
-    let bs1000 = B.pack $ replicate 1000 1
+        bs1000 = B.pack $ replicate 1000 1
+        t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
+        t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
 
     -- LISTS INSTANCES SCRATCH:
       -- Significantly slower than unfolded:
@@ -94,14 +97,11 @@ main = do
             , bench "hashLeftUnfolded" $ nf (hashLeftUnfolded fnvOffsetBasis32) [1..sz]
           --, bench "hashLeftUnfolded trying to fuse" $ nf (\i-> hashLeftUnfolded fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             ]
-    let bgroupBytestring sz bs = bgroup ("bytestrings "++show (sz::Int)) $ [
-             -- bench "hashBytesWord32x2" $ nf (hashBytesWord32x2 fnvOffsetBasis32) bs 
-             -- This is just a couple % slower, but much easier to get right, esp for Text:
-                bench "hashBytesUnrolled64" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs 
-              ]
     defaultMain [ 
-        bgroupBytestring 50 bs50
-      , bgroupBytestring 1000 bs1000
+        bench "hashBytesUnrolled64 (50)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs50 
+      , bench "hashBytesUnrolled64 (1000)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs1000
+      , bench "hashText (50)" $ nf (hashText fnvOffsetBasis32) t50
+      , bench "hashText (1000)" $ nf (hashText fnvOffsetBasis32) t1000
 
       , bench "bytes32" $ nf bytes32 0x66666666
 

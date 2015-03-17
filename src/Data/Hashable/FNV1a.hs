@@ -64,6 +64,10 @@ import qualified Data.ByteString.Internal as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Short as BSh -- TODO conditional
 import qualified Data.Text as T
+import qualified Data.Text.Internal as T
+import qualified Data.Text.Array as T (Array(..))
+import qualified Data.Primitive as P
+import qualified Data.Primitive.ByteArray as P (indexByteArray,ByteArray(..))
 import qualified Data.Text.Lazy as TL
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
@@ -344,6 +348,10 @@ instance Hashable BL.ByteString where
 instance Hashable BSh.ShortByteString where
 instance Hashable T.Text where
 instance Hashable TL.Text where
+-- | Here we hash each byte of the array in turn. Depending on the size and
+-- alignment of data stored, this might include padding bytes and might result
+-- in a different value across different architectures.
+instance Hashable P.ByteArray where
 
 instance Hashable a => Hashable [a] where
 
@@ -418,6 +426,7 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 --   - variable-width & sum types:
 --     - test in an automated way [[1,2],[3]] vs [[1]],[2,3]] issue
 --     - somehow test problem of marker bits added to *end* i.e. 
+--   - quickcheck equivalence of "array-like" instances, as far as possible.
 --   - cross-architecture compatibility (against serialized random output from quickcheck)
 --   - avalanche etc. properties for both primitive and compount instances
 --
@@ -510,6 +519,8 @@ hashLeftNoList = go
 -- TODO TESTING make sure to test on bytestrings where off /= 0
 
 
+-- TODO Factor out common code here:
+
 
 -- This is about twice as fast as a loop with single byte peeks:
 hashBytesUnrolled64 :: Word32 -> B.ByteString -> Word32
@@ -540,5 +551,46 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> B.inlinePerformIO $
                 | otherwise     = assert (ix <= ixFinal) $ do
                     byt <- peekByteOff base ix
                     hashRemainingBytes (hAcc <# byt) (ix+1)
-
+        
         hash8ByteLoop h off 
+
+
+-- TODO TESTING, quickcheck against hashBytesUnrolled64
+hashText :: Word32 -> T.Text -> Word32
+{-# INLINE hashText #-}
+hashText h = \(T.Text (T.Array ba_) off16 len16) -> 
+    let ba = P.ByteArray ba_
+        !lenBytes = len16 `unsafeShiftL` 1 -- len16 * 2
+        !off      = off16 `unsafeShiftL` 1 -- off16 * 2
+     -- make sure our ByteArray is packed UTF-16 so we're not hashing padding
+     in assert (P.sizeOf (0::Word16) == 2 && P.alignment (0::Word16) == 2) $
+          hashByteArray h off lenBytes ba
+
+hashByteArray :: Word32 -> Int -> Int -> P.ByteArray -> Word32
+{-# INLINE hashByteArray #-}
+hashByteArray h !off !lenBytes ba = 
+    let !bytesRem = lenBytes .&. 7         -- lenBytes `mod` 8
+        -- index where we begin to read (bytesRem < 8) individual bytes:
+        !bytesIx = off+lenBytes-bytesRem
+        !ixFinal = off+lenBytes-1
+
+        hash8ByteLoop !hAcc !ix 
+            | ix == bytesIx = hashRemainingBytes hAcc bytesIx
+            | otherwise     = assert (ix < bytesIx) $
+                let b0 = P.indexByteArray ba ix
+                    b1 = P.indexByteArray ba (ix+1)
+                    b2 = P.indexByteArray ba (ix+2)
+                    b3 = P.indexByteArray ba (ix+3)
+                    b4 = P.indexByteArray ba (ix+4)
+                    b5 = P.indexByteArray ba (ix+5)
+                    b6 = P.indexByteArray ba (ix+6)
+                    b7 = P.indexByteArray ba (ix+7)
+                 in hash8ByteLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 8)
+        
+        -- TODO we could unroll this for [0..7]
+        hashRemainingBytes !hAcc !ix 
+            | ix > ixFinal  = hAcc 
+            | otherwise     = assert (ix <= ixFinal) $ do
+                let b0 = P.indexByteArray ba ix
+                 in hashRemainingBytes (hAcc <# b0) (ix+1)
+     in hash8ByteLoop h off 

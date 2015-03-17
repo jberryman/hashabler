@@ -72,20 +72,19 @@ import qualified Data.Text as T
 import qualified Data.Text.Internal as T
 import qualified Data.Text.Array as T (Array(..))
 import qualified Data.Primitive as P
-import qualified Data.Primitive.ByteArray as P (indexByteArray,ByteArray(..))
-import qualified Data.Text.Lazy.Internal as TL (foldlChunks, Text)
+import qualified Data.Text.Lazy as TL (foldlChunks, Text)
 import Foreign.ForeignPtr (withForeignPtr)
 import Foreign.Storable (peekByteOff)
-import Foreign.Ptr (plusPtr)
 
 import Control.Exception(assert)
 
 -- For casting of floating point values:
-import Data.Word (Word32, Word64)
 import Data.Array.ST (newArray, readArray, MArray, STUArray)
 import Data.Array.Unsafe (castSTUArray)
 import GHC.ST (runST, ST)
 
+-- for reading the bytes of ByteStrings:
+import System.IO.Unsafe (unsafeDupablePerformIO)
 
 {-
 -- see also the non-powers of two mapping methods outlined:
@@ -580,7 +579,7 @@ hashLeftNoList = go
 -- This is about twice as fast as a loop with single byte peeks:
 hashBytesUnrolled64 :: Word32 -> B.ByteString -> Word32
 {-# INLINE hashBytesUnrolled64 #-}
-hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> B.inlinePerformIO $
+hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
       withForeignPtr fp $ \base -> do
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
             -- index where we begin to read (bytesRem < 8) individual bytes:

@@ -510,29 +510,28 @@ hashLeftNoList = go
 -- TODO TESTING make sure to test on bytestrings where off /= 0
 
 
--- Doing two Word32 peeks at a time is ~10% faster than one Word32 peek on
--- 32-bit arch, which is ~twice as fast as individual byte peeks.
-hashBytesWord32x2 :: Word32 -> B.ByteString -> Word32
-{-# INLINE hashBytesWord32x2 #-}
-hashBytesWord32x2 h = \(B.PS fp off lenBytes) -> B.inlinePerformIO $
+
+-- This is about twice as fast as a loop with single byte peeks:
+hashBytesUnrolled64 :: Word32 -> B.ByteString -> Word32
+{-# INLINE hashBytesUnrolled64 #-}
+hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> B.inlinePerformIO $
       withForeignPtr fp $ \base -> do
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
-            -- index where we begin to read bytesRem individual bytes:
+            -- index where we begin to read (bytesRem < 8) individual bytes:
             !bytesIx = off+lenBytes-bytesRem
             !ixFinal = off+lenBytes-1
 
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
-                    -- TODO IFDEF on 32-bit arch
-                    wd32_a <- peekByteOff base ix
-                    wd32_b <- peekByteOff base (ix + 4)
-                    let (b0,b1,b2,b3) = bytes32 wd32_a
-                    let (b4,b5,b6,b7) = bytes32 wd32_b
-                    -- TODO ELSE on 64-bit arch
-                 -- wd64 <- peekByteOff base ix
-                 -- let (b0,b1,b2,b3,b4,b5,b6,b7) = bytes64 wd64
-                    -- TODO ENDIF
+                    b0 <- peekByteOff base ix
+                    b1 <- peekByteOff base (ix+1)
+                    b2 <- peekByteOff base (ix+2)
+                    b3 <- peekByteOff base (ix+3)
+                    b4 <- peekByteOff base (ix+4)
+                    b5 <- peekByteOff base (ix+5)
+                    b6 <- peekByteOff base (ix+6)
+                    b7 <- peekByteOff base (ix+7)
                     hash8ByteLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 8)
             
             -- TODO we could unroll this for [0..7]

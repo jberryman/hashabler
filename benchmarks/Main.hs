@@ -94,8 +94,10 @@ main = do
             , bench "hashLeftUnfolded" $ nf (hashLeftUnfolded fnvOffsetBasis32) [1..sz]
           --, bench "hashLeftUnfolded trying to fuse" $ nf (\i-> hashLeftUnfolded fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             ]
-    let bgroupBytestring sz bs = bgroup ("bytestrings "++show sz) $ [
-                bench "hashBytesWord32x2" $ nf (hashBytesWord32x2 fnvOffsetBasis32) bs 
+    let bgroupBytestring sz bs = bgroup ("bytestrings "++show (sz::Int)) $ [
+             -- bench "hashBytesWord32x2" $ nf (hashBytesWord32x2 fnvOffsetBasis32) bs 
+             -- This is just a couple % slower, but much easier to get right, esp for Text:
+                bench "hashBytesUnrolled64" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs 
               ]
     defaultMain [ 
         bgroupBytestring 50 bs50

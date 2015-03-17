@@ -271,6 +271,9 @@ instance Hashable Bool where
        | b         = hash32WithSalt seed (1::Word8) 
        | otherwise = hash32WithSalt seed (0::Word8) -- TODO we could omit the xor here.
 
+    -- TODO: actually is it even useful to have these static implementations?
+    -- These small-universe types are not going to be useful at the top level,
+    -- only as leaves or components of products. TODO REMOVE FROM CLASS
     {-# INLINE hash32 #-}
     hash32 b = 
         let h = if b then 67918732 else 84696351
@@ -395,6 +398,10 @@ instance Hashable P.ByteArray where
         hashByteArray seed 0 (P.sizeofByteArray ba) ba
 
 instance Hashable a => Hashable [a] where
+    -- TODO OPTIMIZE (see notes below)
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = mixConstructor 0 .
+        hashFoldl' seed
 
 -- ------------------------------------------------------------------
 
@@ -536,7 +543,8 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 -- 7.8
 --   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  8.938 μs  -- NOTE: in general, 7.8 seems to do poorly applying folds to this in the context of criterion benchmarks
 --   APPLIED TO ([1.. 250 :: Word8])                  846.5 ns
-hashFoldl' :: Word32 -> [Word8] -> Word32
+hashFoldl' :: Hashable a=> Word32 -> [a] -> Word32
+-- hashFoldl' :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
 {-# INLINE hashFoldl' #-}
 hashFoldl' = foldl' (\h' a-> h' `hash32WithSalt` a)
 
@@ -544,7 +552,8 @@ hashFoldl' = foldl' (\h' a-> h' `hash32WithSalt` a)
 --   APPLIED TO ([1.. 250 :: Word8])                  675.6 ns
 -- 7.8
 --   APPLIED TO ([1.. 250 :: Word8])                  729.6 ns
-hashLeftUnfolded :: Word32 -> [Word8] -> Word32
+hashLeftUnfolded :: Hashable a=> Word32 -> [a] -> Word32
+-- hashLeftUnfolded :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
 {-# INLINE hashLeftUnfolded #-}
 hashLeftUnfolded = go
     where go !h [] = h
@@ -554,7 +563,7 @@ hashLeftUnfolded = go
 
 
 -- BASELINE: a fused foldl' equivalent -- NOTE ~ 2x faster than Unfolded on 7.10
-hashLeftNoList :: Word32 -> Word8 -> Word32
+hashLeftNoList :: Word32 -> Word8 -> Word32  -- NOTE: tested w/ this monomorphic sig
 {-# INLINE hashLeftNoList #-}
 hashLeftNoList = go
     where go !h 0 = h

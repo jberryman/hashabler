@@ -88,6 +88,10 @@ main = do
       -- , bench "hashFoldr" $ nf (hashFoldr fnvOffsetBasis32) [1..250]
       -- , bench "hashFoldrExtra" $ nf (hashFoldrExtra fnvOffsetBasis32) [1..250]
 
+    -- TODO new set of list benchmarks:
+    --        - different ways of constructing as "good producers" (and not)
+    --        - different element types (e.g. Enum of Int vs Word32)
+    --        - different syntactic variations, w/ eta expansion etc.
     let listBgroup nm sz = bgroup nm [
             -- ideal code, for baseline:
               bench "hashLeftNoList" $ nf (hashLeftNoList fnvOffsetBasis32) sz
@@ -99,7 +103,7 @@ main = do
             -- Slow:
             , bench "hashFoldl'" $ nf (hashFoldl' fnvOffsetBasis32) [1..sz]
             -- !!! As fast as hashLeftNoList -- TODO is there really a rule firing here?
-            , bench "hashFoldl' trying to fuse" $ nf (\i-> hashFoldl' fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
+            , bench "hashFoldl' trying to fuse" $ nf (\i-> hashFoldl' fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) (1::Word8)
             -- adding extra multiply adds ~ 65% overhead!:
           --, bench "hashFoldl'Extra trying to fuse" $ nf (\i-> hashFoldl'Extra fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             -- Faster than un-fused (I think that's what's happening) fold-based code:

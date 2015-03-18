@@ -223,6 +223,9 @@ cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
 --        - call it "combine" or "hashedWith" or "hasingIn"
 --        - possibly use (<#) operator
 --        - mention that we're "mixing right hand data into left-hand side hash"
+--
+-- TODO ENDIANNESS make a note and revisit instances: USE BIG ENDIAN (mostly because of network byte order)
+--        - e.g. see Double and Float
 
 -- | A class of types that can be converted into a hash value. For relevant
 -- instances of primitive types, we expect 'hash32' and 'hash64' to produce
@@ -279,15 +282,19 @@ instance Hashable Bool where
          in assert (h == hash32WithSalt fnvOffsetBasis32 b) h
 
 -- ---------
+
 -- Architecture-dependent types, with special handling.
 instance Hashable Int where
 instance Hashable Word where
 
+-- TODO which encoding to use?
+--       - make so hash (T.pack foo) == hash foo? (i.e. UTF-16)?
+--         - NOTE: U+D800 through U+DFFF are invalid unicode code points and will be replaced by Text functions
+--       - but UTF-8 seems more common
                              -- "values represent Unicode (or equivalently ISO/IEC 10646) characters..."
 instance Hashable Char where -- maxbound is 1114111 (~21 bits), `ord :: Char -> Int`
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = hash32WithSalt seed . ord
-    -- TODO pre-hash all but last 3 bytes.
 
 
 -- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly
@@ -375,22 +382,24 @@ instance Hashable BSh.ShortByteString where
               hashByteArray seed 0 (P.sizeofByteArray ba) ba
 #endif
 
--- | Strict @Text@
+-- | Strict @Text@, hashed as big endian UTF-16.
 instance Hashable T.Text where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = mixConstructor 0 .
         hashText seed
 
 -- TODO benchmarks for fusion:
--- | Lazy @Text@
+-- | Lazy @Text@, hashed as big endian UTF-16.
 instance Hashable TL.Text where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = mixConstructor 0 .
         TL.foldlChunks hashText seed
 
--- | Here we hash each byte of the array in turn. Depending on the size and
--- alignment of data stored, this might include padding bytes and might result
--- in a different value across different architectures.
+-- | Here we hash each byte of the array in turn. If using this to hash some
+-- data stored internally as a @ByteArray#@, be aware that depending on the
+-- size and alignment requirements of that data, as well as the endianness of
+-- your machine, this might result in different hash values across different
+-- architectures.
 instance Hashable P.ByteArray where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = \ba-> mixConstructor 0 $
@@ -609,17 +618,41 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
         hash8ByteLoop h off 
 
 
+-- TODO WE NEED TO HANDLE ENDIAN-NESS! IF WE FETCH BYTE-16s DOES THAT WORK?
+--       see Data.Text.Foreign
 -- TODO TESTING, quickcheck against hashBytesUnrolled64
 --      TESTING, make sure we use characters of variable width. 
+--      TESTING, test: hash t == hash (encodeUtf16BE t)  -- TODO or use big endian?
+
+-- NOTE: we can't simply call hashByteArray here; Text is stored as
+-- machine-endian UTF-16 (as promised by public Data.Text.Foreign), so we need
+-- to read Word16 here in order to hash as Big-Endian UTF-16.
 hashText :: Word32 -> T.Text -> Word32
 {-# INLINE hashText #-}
-hashText h = \(T.Text (T.Array ba_) off16 len16) -> 
+hashText h = \(T.Text (T.Array ba_) off lenWord16) -> 
     let ba = P.ByteArray ba_
-        !lenBytes = len16 `unsafeShiftL` 1 -- len16 * 2
-        !off      = off16 `unsafeShiftL` 1 -- off16 * 2
-     -- make sure our ByteArray is packed UTF-16 so we're not hashing padding
-     in assert (P.sizeOf (0::Word16) == 2 && P.alignment (0::Word16) == 2) $
-          hashByteArray h off lenBytes ba
+        !word16sRem = lenWord16 .&. 3         -- lenWord16 `mod` 4
+        -- index where we begin to read (word16sRem < 4) individual Word16s:
+        !word16sIx = off+lenWord16-word16sRem
+        !ixFinal = off+lenWord16-1
+
+        hash4Word16sLoop !hAcc !ix 
+            | ix == word16sIx = hashRemainingWord16s hAcc word16sIx
+            | otherwise     = assert (ix < word16sIx) $
+                let (b0,b1) = bytes16 $ P.indexByteArray ba ix
+                    (b2,b3) = bytes16 $ P.indexByteArray ba (ix+1)
+                    (b4,b5) = bytes16 $ P.indexByteArray ba (ix+2)
+                    (b6,b7) = bytes16 $ P.indexByteArray ba (ix+3)
+                 in hash4Word16sLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 4)
+        
+        -- TODO we could unroll this for [0..3]
+        hashRemainingWord16s !hAcc !ix 
+            | ix > ixFinal  = hAcc 
+            | otherwise     = assert (ix <= ixFinal) $ do
+                let (b0,b1) = bytes16 $ P.indexByteArray ba ix
+                 in hashRemainingWord16s (hAcc <# b0 <# b1) (ix+1)
+     in hash4Word16sLoop h off 
+
 
 hashByteArray :: Word32 -> Int -> Int -> P.ByteArray -> Word32
 {-# INLINE hashByteArray #-}

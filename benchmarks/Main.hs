@@ -80,6 +80,14 @@ main = do
         bs1000Lazy_by20Chunks = BL.fromChunks $ replicate 20 bs50
     let t50LazyTrivial = TL.fromStrict t50
         t1000Lazy_by20Chunks = TL.fromChunks $ replicate 20 t50
+    -- try to replicate Int 64 -> Int 32 handling
+    let !i16Max = fromIntegral (maxBound :: Int16)
+        !iOutOfRange = maxBound `div` 2 :: Int
+        !iInRange = 1000
+
+        rangeTest :: Int -> Bool
+        rangeTest i = abs i > i16Max
+
 
     -- LISTS INSTANCES SCRATCH:
       -- Significantly slower than unfolded:
@@ -111,21 +119,27 @@ main = do
           --, bench "hashLeftUnfolded trying to fuse" $ nf (\i-> hashLeftUnfolded fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             ]
     defaultMain [ 
+    {- This is fast:
+        bench "conditional on Int size, t" $ nf rangeTest iInRange
+      , bench "conditional on Int size, f" $ nf rangeTest iOutOfRange
+      , bench "baseline Bool" $ nf (\x-> x) True
+      -}
+
         bench "hashBytesUnrolled64 (50)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs50 
       -- ought to be same as above:
-      , bench "hash32WithSalt (50) (using hashBytesUnrolled64)" $ nf (hash32WithSalt fnvOffsetBasis32) bs50 
-      , bench "hash32WithSalt (50, trivial lazy ByteString)" $ nf (hash32WithSalt fnvOffsetBasis32) bs50LazyTrivial
+      , bench "hash32WithSalt (50, strict ByteString)" $ nf hash32 bs50 
+      , bench "hash32WithSalt (50, trivial lazy ByteString)" $ nf hash32 bs50LazyTrivial
       , bench "hashBytesUnrolled64 (1000)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs1000
-      , bench "hash32WithSalt (1000, lazy ByteString, 20 chunks)" $ nf (hash32WithSalt fnvOffsetBasis32) bs1000Lazy_by20Chunks
+      , bench "hash32WithSalt (1000, lazy ByteString, 20 chunks)" $ nf hash32 bs1000Lazy_by20Chunks
 
       , bench "hashText (50)" $ nf (hashText fnvOffsetBasis32) t50
       -- ought to be same as above:
-      , bench "hash32WithSalt (50) (using hashText)" $ nf (hash32WithSalt fnvOffsetBasis32) t50
-      , bench "hash32WithSalt (50, trivial lazy Text)" $ nf (hash32WithSalt fnvOffsetBasis32) t50LazyTrivial
+      , bench "hash32WithSalt (50) (using hashText)" $ nf hash32 t50
+      , bench "hash32WithSalt (50, trivial lazy Text)" $ nf hash32 t50LazyTrivial
       -- also ought to be same as above:
-      , bench "hash32WithSalt (ByteArray, 50)" $ nf (hash32WithSalt fnvOffsetBasis32) ba50
+      , bench "hash32WithSalt (ByteArray, 50)" $ nf hash32 ba50
       , bench "hashText (1000)" $ nf (hashText fnvOffsetBasis32) t1000
-      , bench "hash32WithSalt (1000, lazy Text, 20 chunks)" $ nf (hash32WithSalt fnvOffsetBasis32) t1000Lazy_by20Chunks
+      , bench "hash32WithSalt (1000, lazy Text, 20 chunks)" $ nf hash32 t1000Lazy_by20Chunks
 
       , bench "bytes32" $ nf bytes32 0x66666666
 

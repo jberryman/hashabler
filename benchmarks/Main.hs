@@ -88,6 +88,8 @@ main = do
         rangeTest :: Int -> Bool
         rangeTest i = abs i > i16Max
 
+        char2Word :: Char -> Word16
+        char2Word = fromIntegral . ord
 
     -- LISTS INSTANCES SCRATCH:
       -- Significantly slower than unfolded:
@@ -125,7 +127,12 @@ main = do
       , bench "baseline Bool" $ nf (\x-> x) True
       -}
 
-        bench "hashBytesUnrolled64 (50)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs50 
+        bench "baseline32" $ nf (\x-> x) (777::Word32)
+      , bench "hash32 via ord (Char small)" $ nf (hash32 . char2Word) 'a'
+      , bench "hash32 (Char small)" $ nf hash32 'a'
+      , bench "hash32 (Char big)"   $ nf hash32 '\65537'
+
+      , bench "hashBytesUnrolled64 (50)" $ nf (hashBytesUnrolled64 fnvOffsetBasis32) bs50 
       -- ought to be same as above:
       , bench "hash32WithSalt (50, strict ByteString)" $ nf hash32 bs50 
       , bench "hash32WithSalt (50, trivial lazy ByteString)" $ nf hash32 bs50LazyTrivial
@@ -175,7 +182,6 @@ main = do
       , bench "baseline decodeFloat" $ nf (\x-> x) (9320666::Integer,-23::Int)
       -}
 
-      , bench "baseline32" $ nf (\x-> x) (777::Word32)
 
       {- quite slow
       , bench "bytestring 32" $ nf (toLazyByteString . int32LE) (777::Int32)

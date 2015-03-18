@@ -291,6 +291,7 @@ instance Hashable Word where
 --              also String.
 --      TESTING that chars in range U+D800 to U+DFFF hash to different values
 
+-- TODO look at core
 -- | Hash a @Char@ as big endian UTF-16. Note that Char permits values in the
 -- reserved unicode range U+D800 to U+DFFF; these Char values are added to the
 -- hash just as if they were valid 16-bit characters.
@@ -298,19 +299,18 @@ instance Hashable Char where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = go where
       -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
-      go c
-        | n < 0x10000 =
-            let (b0,b1) = bytes16 $ fromIntegral n
-             in seed <# b0 <# b1
+      go c | n < 0x10000 =
+               let (b0,b1) = bytes16 $ fromIntegral n
+                in seed <# b0 <# b1
 
-        | otherwise = do
-            let (b0,b1) = bytes16 lo
-                (b2,b3) = bytes16 hi
-             in seed <# b0 <# b1 <# b2 <# b3
+           | otherwise = do
+               let (b0,b1) = bytes16 lo
+                   (b2,b3) = bytes16 hi
+                in seed <# b0 <# b1 <# b2 <# b3
 
         where n = ord c
               m = n - 0x10000
-              lo = fromIntegral $ (m `shiftR` 10) + 0xD800
+              lo = fromIntegral $ (m `unsafeShiftR` 10) + 0xD800
               hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
 

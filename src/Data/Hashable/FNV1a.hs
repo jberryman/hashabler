@@ -287,14 +287,31 @@ instance Hashable Bool where
 instance Hashable Int where
 instance Hashable Word where
 
--- TODO which encoding to use?
---       - make so hash (T.pack foo) == hash foo? (i.e. UTF-16)?
---         - NOTE: U+D800 through U+DFFF are invalid unicode code points and will be replaced by Text functions
---       - but UTF-8 seems more common
-                             -- "values represent Unicode (or equivalently ISO/IEC 10646) characters..."
-instance Hashable Char where -- maxbound is 1114111 (~21 bits), `ord :: Char -> Int`
+-- TODO TESTING matches singleton Text instance (make sure to test double-wide)
+--              also String.
+--      TESTING that chars in range U+D800 to U+DFFF hash to different values
+
+-- | Hash a @Char@ as big endian UTF-16. Note that Char permits values in the
+-- reserved unicode range U+D800 to U+DFFF; these Char values are added to the
+-- hash just as if they were valid 16-bit characters.
+instance Hashable Char where
     {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = hash32WithSalt seed . ord
+    hash32WithSalt seed = go where
+      -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
+      go c
+        | n < 0x10000 =
+            let (b0,b1) = bytes16 $ fromIntegral n
+             in seed <# b0 <# b1
+
+        | otherwise = do
+            let (b0,b1) = bytes16 lo
+                (b2,b3) = bytes16 hi
+             in seed <# b0 <# b1 <# b2 <# b3
+
+        where n = ord c
+              m = n - 0x10000
+              lo = fromIntegral $ (m `shiftR` 10) + 0xD800
+              hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
 
 -- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly

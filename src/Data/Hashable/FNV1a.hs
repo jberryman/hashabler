@@ -317,7 +317,7 @@ instance Hashable Word where
 #endif
 
 -- we'll test these internals for equality in 32-bit Int range, against
--- instance for Int32:
+-- instance for Int32. TODO TESTING
 
 -- NOTE: the expressions in the conditionals alone make these quite slow on
 --       32-bit machines, so don't worry about benchmarking this directly.
@@ -349,12 +349,12 @@ instance Hashable Char where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = go where
       -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
-    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, and/or try making conditional a backwards jump?
+    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
       go c | n < 0x10000 =
                let (b0,b1) = bytes16 $ fromIntegral n
                 in seed <# b0 <# b1
 
-           | otherwise = do
+           | otherwise =
                let (b0,b1) = bytes16 lo
                    (b2,b3) = bytes16 hi
                 in seed <# b0 <# b1 <# b2 <# b3
@@ -657,7 +657,7 @@ hashLeftNoList = go
 hashBytesUnrolled64 :: Word32 -> B.ByteString -> Word32
 {-# INLINE hashBytesUnrolled64 #-}
 hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
-      withForeignPtr fp $ \base -> do
+      withForeignPtr fp $ \base ->
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
             -- index where we begin to read (bytesRem < 8) individual bytes:
             !bytesIx = off+lenBytes-bytesRem
@@ -683,7 +683,7 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
                     byt <- peekByteOff base ix
                     hashRemainingBytes (hAcc <# byt) (ix+1)
         
-        hash8ByteLoop h off 
+         in hash8ByteLoop h off 
 
 
 -- TODO WE NEED TO HANDLE ENDIAN-NESS! IF WE FETCH BYTE-16s DOES THAT WORK?
@@ -716,7 +716,7 @@ hashText h = \(T.Text (T.Array ba_) off lenWord16) ->
         -- TODO we could unroll this for [0..3]
         hashRemainingWord16s !hAcc !ix 
             | ix > ixFinal  = hAcc 
-            | otherwise     = assert (ix <= ixFinal) $ do
+            | otherwise     = assert (ix <= ixFinal) $
                 let (b0,b1) = bytes16 $ P.indexByteArray ba ix
                  in hashRemainingWord16s (hAcc <# b0 <# b1) (ix+1)
      in hash4Word16sLoop h off 
@@ -746,7 +746,7 @@ hashByteArray h !off !lenBytes ba =
         -- TODO we could unroll this for [0..7]
         hashRemainingBytes !hAcc !ix 
             | ix > ixFinal  = hAcc 
-            | otherwise     = assert (ix <= ixFinal) $ do
+            | otherwise     = assert (ix <= ixFinal) $
                 let b0 = P.indexByteArray ba ix
                  in hashRemainingBytes (hAcc <# b0) (ix+1)
      in hash8ByteLoop h off 

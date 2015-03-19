@@ -61,6 +61,10 @@ import Data.Int
 import Data.Bits
 import Data.Char
 import Data.List
+import Data.Ratio
+import Control.Concurrent(ThreadId)
+import Data.Typeable(TypeRep)
+import System.Mem.StableName(StableName)
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -264,26 +268,17 @@ class Hashable a where
   --{-# INLINE hash64 #-}
   --hash64 a = hash64WithSalt fnvOffsetBasis64 a
 
--- ---------
--- Instances that ought to match the test vectors from the spec!
+
+-- ------------------------------------------------------------------
+-- NUMERIC TYPES:
+
+instance Hashable Integer where
+    -- GHC.Integer.GMP.Internals from integer-gmp (part of GHC distribution)
+    -- TODO be careful that Eq values hash to the same!
+
+instance (Integral a, Hashable a) => Hashable (Ratio a) where
 
 
-
--- | 'True' hashes to @'hash32' (1::Word8)@, 'False' hashes to @'hash32' (0::Word8)@
--- TODO or use fromBool/toBool from Foreign.Marshal.Utils (why?)
-instance Hashable Bool where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed b
-       | b         = hash32WithSalt seed (1::Word8) 
-       | otherwise = hash32WithSalt seed (0::Word8) -- TODO we could omit the xor here.
-
-    -- TODO: actually is it even useful to have these static implementations?
-    -- These small-universe types are not going to be useful at the top level,
-    -- only as leaves or components of products. TODO REMOVE FROM CLASS
-    {-# INLINE hash32 #-}
-    hash32 b = 
-        let h = if b then 67918732 else 84696351
-         in assert (h == hash32WithSalt fnvOffsetBasis32 b) h
 
 -- ---------
 -- Architecture-dependent types, with special handling.
@@ -337,32 +332,6 @@ _hash32WithSalt_Word_64 h = \w->
         then hash32WithSalt h (fromIntegral w :: Word32)
         else hash32WithSalt h w
 
--- TODO TESTING matches singleton Text instance (make sure to test double-wide)
---              also String.
---      TESTING that chars in range U+D800 to U+DFFF hash to different values
-
--- TODO look at core
--- | Hash a @Char@ as big endian UTF-16. Note that Char permits values in the
--- reserved unicode range U+D800 to U+DFFF; these Char values are added to the
--- hash just as if they were valid 16-bit characters.
-instance Hashable Char where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = go where
-      -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
-    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
-      go c | n < 0x10000 =
-               let (b0,b1) = bytes16 $ fromIntegral n
-                in seed <# b0 <# b1
-
-           | otherwise =
-               let (b0,b1) = bytes16 lo
-                   (b2,b3) = bytes16 hi
-                in seed <# b0 <# b1 <# b2 <# b3
-
-        where n = ord c
-              m = n - 0x10000
-              lo = fromIntegral $ (m `unsafeShiftR` 10) + 0xD800
-              hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
 
 -- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly
@@ -417,7 +386,14 @@ instance Hashable Word64 where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = hash32WithSalt seed . bytes64_alt    -- TODO CONDITIONAL on arch
 
--- THESE HAVE VARIABLE LENGTH, and require:  ------------------------
+
+-- ------------------------------------------------------------------
+-- ARRAYS AND LIST:
+
+
+-- Since below have variable-length, we'll use this helper (which is also
+-- useful for multi-constructor types):
+
 mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
                -> Word32 -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
                -> Word32 -- ^ New hash value
@@ -473,35 +449,84 @@ instance Hashable P.ByteArray where
     hash32WithSalt seed = \ba-> mixConstructor 0 $
         hashByteArray seed 0 (P.sizeofByteArray ba) ba
 
+-- ------------------------------------------------------------------
+-- MISC THINGS:
+
+
+-- TODO TESTING matches singleton Text instance (make sure to test double-wide)
+--              also String.
+--      TESTING that chars in range U+D800 to U+DFFF hash to different values
+
+-- TODO look at core
+-- | Hash a @Char@ as big endian UTF-16. Note that Char permits values in the
+-- reserved unicode range U+D800 to U+DFFF; these Char values are added to the
+-- hash just as if they were valid 16-bit characters.
+instance Hashable Char where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = go where
+      -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
+    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
+      go c | n < 0x10000 =
+               let (b0,b1) = bytes16 $ fromIntegral n
+                in seed <# b0 <# b1
+
+           | otherwise =
+               let (b0,b1) = bytes16 lo
+                   (b2,b3) = bytes16 hi
+                in seed <# b0 <# b1 <# b2 <# b3
+
+        where n = ord c
+              m = n - 0x10000
+              lo = fromIntegral $ (m `unsafeShiftR` 10) + 0xD800
+              hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
+
+instance Hashable ThreadId where
+instance Hashable TypeRep where
+instance Hashable (StableName a) where
+
+
+-- ------------------------------------------------------------------
+-- ALGEBRAIC DATA TYPES:
+
+
+-- ---------
+-- Sum types
+
+-- TODO REVISIT
+-- | 'True' hashes to @'hash32' (1::Word8)@, 'False' hashes to @'hash32' (0::Word8)@
+-- TODO or use fromBool/toBool from Foreign.Marshal.Utils (why?)
+instance Hashable Bool where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed b
+       | b         = hash32WithSalt seed (1::Word8) 
+       | otherwise = hash32WithSalt seed (0::Word8) -- TODO we could omit the xor here.
+
+    -- TODO: actually is it even useful to have these static implementations?
+    -- These small-universe types are not going to be useful at the top level,
+    -- only as leaves or components of products. TODO REMOVE FROM CLASS
+    {-# INLINE hash32 #-}
+    hash32 b = 
+        let h = if b then 67918732 else 84696351
+         in assert (h == hash32WithSalt fnvOffsetBasis32 b) h
+
+
+instance Hashable Ordering where
+
 instance Hashable a => Hashable [a] where
     -- TODO OPTIMIZE (see notes below)
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = mixConstructor 0 .
         hashFoldl' seed
 
--- ------------------------------------------------------------------
-
-{-
--- ---------
--- These ought to hash in some reasonable and good way. Recursive instances
--- ought to be defined in terms of hash*WithSalt on subterms; this should
--- ensure we don't get e.g. hash [[1],[2,3]] == hash [[1,2],[3]].
-
-instance Hashable Integer where
-    -- GHC.Integer.GMP.Internals from integer-gmp (part of GHC distribution)
-    -- TODO be careful that Eq values hash to the same!
-instance (Integral a, Hashable a) => Hashable (Ratio a) where
-instance Hashable Ordering where
-instance Hashable () where
-instance Hashable ThreadId where
-instance Hashable TypeRep where
-instance Hashable (StableName a) where
-
 instance Hashable a => Hashable (Maybe a) where
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
--}
 
--- TUPLES:
+
+-- ---------
+-- Tuples (product types)
+
+instance Hashable () where
+    -- TODO I think this might be the only type that can be a NOOP
 
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
     {-# INLINE hash32WithSalt #-}

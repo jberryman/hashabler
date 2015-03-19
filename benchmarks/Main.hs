@@ -128,6 +128,10 @@ main = do
       -}
 
         bench "baseline32" $ nf (\x-> x) (777::Word32)
+      , bench "hash32 (Int)" $ nf hash32 (9999::Int)
+      , bench "hash32 (Int_64_internal, in 32-bit range)" $ nf hash32 (9999 :: Int)
+      , bench "hash32 (Int_64_internal, out of 32-bit range)" $ nf (_hash32WithSalt_Int_64 fnvOffsetBasis32) (fromIntegral (maxBound :: Int32) *2)
+
       , bench "hash32 via ord (Char small)" $ nf (hash32 . char2Word) 'a'
       , bench "hash32 (Char small)" $ nf hash32 'a'
       , bench "hash32 (Char big)"   $ nf hash32 '\65537'

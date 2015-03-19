@@ -158,6 +158,8 @@ hash32Word64 wd = case bytes64_alt wd of
 -- EXTRACTING BYTES FROM DIFFERENT TYPES ----------------------------
 -- NOTE we're to hash the resulting Word8s from left to right
 
+-- TODO check inlining on these:
+
 bytes16 :: Word16 -> (Word8, Word8)
 {-# INLINE bytes16 #-}
 bytes16 wd = (shifted 8, fromIntegral wd)
@@ -188,6 +190,8 @@ bytes64_alt wd =
      in (b0,b1,b2,b3,b4,b5,b6,b7)
 
 
+-- These appear to return bytes in big endian on my machine (little endian),
+-- but need to verify what happens on a BE machine.
 
 -- Get raw IEEE bytes from floating point types.
 -- TODO better, if possible
@@ -282,10 +286,56 @@ instance Hashable Bool where
          in assert (h == hash32WithSalt fnvOffsetBasis32 b) h
 
 -- ---------
-
 -- Architecture-dependent types, with special handling.
+
+-- | @Int@ has architecture-specific size. When hashing on 64-bit machines if
+-- the @Int@ value to be hashed falls in the 32-bit Int range, we first cast it
+-- to an Int32. This should help ensure that programs that are correct across
+-- architectures will also produce the same hash values.
 instance Hashable Int where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed i =
+#ifdef WORD_IS_DEFINITELY_32_BIT
+      assert (P.sizeOf i == 4) $
+        hash32WithSalt seed (fromIntegral i :: Int32)
+#else
+        _hash32WithSalt_Int_64 seed (fromIntegral i)
+#endif
+
+-- | @Word@ has architecture-specific size. When hashing on 64-bit machines if
+-- the @Word@ value to be hashed falls in the 32-bit Word range, we first cast
+-- it to a Word32. This should help ensure that programs that are correct
+-- across architectures will also produce the same hash values.
 instance Hashable Word where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed w =
+#ifdef WORD_IS_DEFINITELY_32_BIT
+      assert (P.sizeOf w == 4) $
+        hash32WithSalt seed (fromIntegral w :: Word32)
+#else
+        _hash32WithSalt_Word_64 seed (fromIntegral w)
+#endif
+
+-- we'll test these internals for equality in 32-bit Int range, against
+-- instance for Int32:
+
+-- NOTE: the expressions in the conditionals alone make these quite slow on
+--       32-bit machines, so don't worry about benchmarking this directly.
+_hash32WithSalt_Int_64 :: Word32 -> Int64 -> Word32
+{-# INLINE _hash32WithSalt_Int_64 #-}
+_hash32WithSalt_Int_64 h = \i->
+    -- Can we losslessly cast to 32-bit representation?
+    if abs i <= (fromIntegral (maxBound :: Int32))
+        then hash32WithSalt h (fromIntegral i :: Int32)
+        else hash32WithSalt h i
+
+_hash32WithSalt_Word_64 :: Word32 -> Word64 -> Word32
+{-# INLINE _hash32WithSalt_Word_64 #-}
+_hash32WithSalt_Word_64 h = \w->
+    -- Can we losslessly cast to 32-bit representation?
+    if w <= (fromIntegral (maxBound :: Word32))
+        then hash32WithSalt h (fromIntegral w :: Word32)
+        else hash32WithSalt h w
 
 -- TODO TESTING matches singleton Text instance (make sure to test double-wide)
 --              also String.
@@ -299,6 +349,7 @@ instance Hashable Char where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = go where
       -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
+    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, and/or try making conditional a backwards jump?
       go c | n < 0x10000 =
                let (b0,b1) = bytes16 $ fromIntegral n
                 in seed <# b0 <# b1

@@ -104,6 +104,9 @@ import GHC.Fingerprint.Type(Fingerprint(..))
 #endif
 
 import System.Mem.StableName
+import Data.Ratio (Ratio, denominator, numerator)
+
+-- TODO SEE ALSO HASHABLE instances for base 4,8
 
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
 
@@ -294,8 +297,10 @@ instance Hashable Integer where
     -- GHC.Integer.GMP.Internals from integer-gmp (part of GHC distribution)
     -- TODO be careful that Eq values hash to the same!
 
+-- | Hash in numerator, then denominator.
 instance (Integral a, Hashable a) => Hashable (Ratio a) where
-
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt s a = s `hash32WithSalt` numerator a `hash32WithSalt` denominator a
 
 
 -- ---------
@@ -415,7 +420,8 @@ instance Hashable Word64 where
 mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
                -> Word32 -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
                -> Word32 -- ^ New hash value
-mixConstructor n h = h `hash32WithSalt` (0xFF - n)
+{-# INLINE mixConstructor #-}
+mixConstructor n = (<# (0xFF - n))
 
 -- | Strict @ByteString@
 instance Hashable B.ByteString where
@@ -556,6 +562,8 @@ instance Hashable Bool where
 
 
 instance Hashable Ordering where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = flip mixConstructor seed . fromIntegral . fromEnum
 
 instance Hashable a => Hashable [a] where
     -- TODO OPTIMIZE (see notes below)

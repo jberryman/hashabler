@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE MagicHash , UnliftedFFITypes #-}
 module Data.Hashable.FNV1a 
 
 -- ** Defining principled Hashable instances
@@ -89,6 +90,13 @@ import GHC.ST (runST, ST)
 
 -- for reading the bytes of ByteStrings:
 import System.IO.Unsafe (unsafeDupablePerformIO)
+
+-- For getting our Int from ThreadId:
+import Foreign.C (CInt(..))
+import GHC.Conc(ThreadId(..))
+import GHC.Prim(ThreadId#)
+
+foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
 
 {-
 -- see also the non-powers of two mapping methods outlined:
@@ -481,6 +489,11 @@ instance Hashable Char where
               hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
 instance Hashable ThreadId where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = \(ThreadId tid)-> 
+        hash32WithSalt seed (fromIntegral $ getThreadId tid :: Word)
+
+
 instance Hashable TypeRep where
 instance Hashable (StableName a) where
 

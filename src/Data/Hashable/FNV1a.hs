@@ -62,10 +62,6 @@ import Data.Int
 import Data.Bits
 import Data.Char
 import Data.List
-import Data.Ratio
-import Control.Concurrent(ThreadId)
-import Data.Typeable(TypeRep)
-import System.Mem.StableName(StableName)
 
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
@@ -572,7 +568,14 @@ instance Hashable a => Hashable [a] where
         hashFoldl' seed
 
 instance Hashable a => Hashable (Maybe a) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed Nothing  = mixConstructor 0 seed
+    hash32WithSalt seed (Just a) = mixConstructor 1 $ hash32WithSalt seed a
+        
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = either (h 0) (h 1) where
+        h n = mixConstructor n . hash32WithSalt seed
 
 
 -- ---------

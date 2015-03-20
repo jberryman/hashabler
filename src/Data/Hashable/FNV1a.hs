@@ -103,7 +103,10 @@ import Data.Typeable.Internal(TypeRep(..))
 import GHC.Fingerprint.Type(Fingerprint(..))
 #endif
 
+import System.Mem.StableName
+
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
+
 
 {-
 -- see also the non-powers of two mapping methods outlined:
@@ -520,7 +523,11 @@ typeRepInt32 =
 #endif
 
 
+-- | No promise of stability across runs or platforms. Implemented via hashStableName
 instance Hashable (StableName a) where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = hash32WithSalt seed . hashStableName
+    
 
 
 -- ------------------------------------------------------------------

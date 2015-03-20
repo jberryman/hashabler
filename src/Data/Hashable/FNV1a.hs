@@ -96,6 +96,13 @@ import Foreign.C (CInt(..))
 import GHC.Conc(ThreadId(..))
 import GHC.Prim(ThreadId#)
 
+-- For TypeRep
+import Data.Typeable
+#if __GLASGOW_HASKELL__ >= 702
+import Data.Typeable.Internal(TypeRep(..))
+import GHC.Fingerprint.Type(Fingerprint(..))
+#endif
+
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
 
 {-
@@ -220,15 +227,15 @@ bytesDouble = bytes64_alt . doubleToWord
 -- See: http://stackoverflow.com/a/7002812/176841 . 
 -- Someone just kill me now...
 floatToWord :: Float -> Word32
-floatToWord x = runST (cast x)
+floatToWord x = runST (castViaSTArray x)
 
 doubleToWord :: Double -> Word64
-doubleToWord x = runST (cast x)
+doubleToWord x = runST (castViaSTArray x)
 
-cast :: (MArray (STUArray s) a (ST s),
-         MArray (STUArray s) b (ST s)) => a -> ST s b
-{-# INLINE cast #-}
-cast x = newArray (0 :: Int, 0) x >>= castSTUArray >>= flip readArray 0
+castViaSTArray :: (MArray (STUArray s) a (ST s),
+                   MArray (STUArray s) b (ST s)) => a -> ST s b
+{-# INLINE castViaSTArray #-}
+castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 
 
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
@@ -488,13 +495,31 @@ instance Hashable Char where
               lo = fromIntegral $ (m `unsafeShiftR` 10) + 0xD800
               hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
+
 instance Hashable ThreadId where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed = \(ThreadId tid)-> 
         hash32WithSalt seed (fromIntegral $ getThreadId tid :: Word)
 
-
 instance Hashable TypeRep where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = hash32WithSalt seed . typeRepInt32
+
+-- TODO TEST IF THESE SEEM TO BE CONSISTENT ACROSS RUNS AND MACHINES (AND DIFFERENT VERSIONS OF BASE >= 7.2)
+--      AND CONSIDER REMOVING SOME CONDITIONS.
+typeRepInt32 :: TypeRep -> Int32
+{-# INLINE typeRepInt32 #-}
+typeRepInt32 = 
+#if __GLASGOW_HASKELL__ >= 702
+    -- Fingerprint is just the MD5, so taking any Int from it is fine
+    \(TypeRep (Fingerprint i64 _) _ _) -> fromIntegral i64
+#else
+-- okay at least in base < 4.4 && >= 4:
+-- THOUGH NOTE TODO: here the actual key may vary from run to run
+    fromIntegral . unsafeDupablePerformIO . typeRepKey
+#endif
+
+
 instance Hashable (StableName a) where
 
 

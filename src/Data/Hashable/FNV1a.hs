@@ -102,6 +102,9 @@ import GHC.Fingerprint.Type(Fingerprint(..))
 import System.Mem.StableName
 import Data.Ratio (Ratio, denominator, numerator)
 
+-- For WORD_SIZE_IN_BITS constant:
+#include "MachDeps.h"
+
 -- TODO SEE ALSO HASHABLE instances for base 4,8
 
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
@@ -309,11 +312,13 @@ instance (Integral a, Hashable a) => Hashable (Ratio a) where
 instance Hashable Int where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed i =
-#ifdef WORD_IS_DEFINITELY_32_BIT
+#if WORD_SIZE_IN_BITS == 32
       assert (P.sizeOf i == 4) $
         hash32WithSalt seed (fromIntegral i :: Int32)
-#else
+#elif WORD_SIZE_IN_BITS == 64
         _hash32WithSalt_Int_64 seed (fromIntegral i)
+#else
+#error We only know how to support 32-bit and 64-bit systems, sorry.
 #endif
 
 -- | @Word@ has architecture-specific size. When hashing on 64-bit machines if
@@ -323,11 +328,13 @@ instance Hashable Int where
 instance Hashable Word where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed w =
-#ifdef WORD_IS_DEFINITELY_32_BIT
+#if WORD_SIZE_IN_BITS == 32
       assert (P.sizeOf w == 4) $
         hash32WithSalt seed (fromIntegral w :: Word32)
-#else
+#elif WORD_SIZE_IN_BITS == 64
         _hash32WithSalt_Word_64 seed (fromIntegral w)
+#else
+#error We only know how to support 32-bit and 64-bit systems, sorry.
 #endif
 
 -- we'll test these internals for equality in 32-bit Int range, against

@@ -18,12 +18,6 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library
-  -- NOTE: for now, code conditional on this being true may only work on 32-bit
-  -- platforms, while code in #else must work regardless of word size.
-  -- TODO other 32-bit arch's here. See: https://github.com/ghc/ghc/blob/71fcc4c096ec0b575522e4c2d0104ef7a71a13c5/aclocal.m4
-  if arch(i386)
-    cpp-options: -DWORD_IS_DEFINITELY_32_BIT
-
   exposed-modules:     Data.Hashable.FNV1a
   -- other-modules:       
   -- other-extensions:    

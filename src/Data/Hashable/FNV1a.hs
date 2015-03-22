@@ -111,6 +111,13 @@ import GHC.Integer.GMP.Internals (BigNat(BN#))
 # endif
 #endif
 
+-- For GHC 7.10 Natural and Void:
+#if MIN_VERSION_base(4,8,0)
+import Data.Void (Void, absurd)
+import GHC.Natural (Natural(..))
+import GHC.Exts (Word(..))
+#endif
+
 -- For WORD_SIZE_IN_BITS constant:
 #include "MachDeps.h"
 -- Do error just once, and assume 32 else 64 below:
@@ -124,7 +131,6 @@ import GHC.Integer.GMP.Internals (BigNat(BN#))
 #endif
 
 
--- TODO SEE ALSO HASHABLE instances for base 4,8
 -- TODO BENCHMARKING for 'abs' see: http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs  and  http://stackoverflow.com/q/22445019/176841
 
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
@@ -347,19 +353,15 @@ instance Hashable Integer where
 #if defined(VERSION_integer_gmp)
     hash32WithSalt seed i = case i of
       (S# n#) ->
-        let magWord :: Word
-            magWord = fromIntegral $ abs (I# n#)
+        let magWord = fromIntegral $ abs (I# n#)
             sign = _signByte (I# n#)
-#      if WORD_SIZE_IN_BITS == 32
-         in mixConstructor sign $ hash32WithSalt seed magWord
-#      else
-            -- only hash enough 32-bit chunks as needed to represent magnitude:
-            (magWord32_0, magWord32_1) = words32 magWord
          in mixConstructor sign $ 
-              if magWord32_0 == 0
-                 then hash32WithSalt seed magWord32_1
-                 else hash32WithSalt seed magWord
-#      endif
+#           if WORD_SIZE_IN_BITS == 32
+              hash32WithSalt seed (magWord :: Word32)
+#           else
+              -- only hash enough 32-bit chunks as needed to represent magnitude
+              _hash32SigWords32 seed magWord
+#           endif
 
 -- GHC 7.10: ------------------------
 --
@@ -406,6 +408,15 @@ _signByte :: Int -> Word8
 _signByte n = fromIntegral ((fromIntegral n :: Word) 
                               `unsafeShiftR` (WORD_SIZE_IN_BITS - 1))
 
+-- Helper for hashing a 64-bit word, possibly omiting the first 32-bit chunk
+-- (if 0). We use this when normalizing big natural representations.
+_hash32SigWords32 :: Word32 -> Word64 -> Word32
+{-# INLINE _hash32SigWords32 #-}
+_hash32SigWords32 seed w64 = 
+     let (word32_0, word32_1) = words32 w64
+      in if word32_0 == 0 
+          then hash32WithSalt seed word32_1
+          else hash32WithSalt seed w64
 
 -- TODO TESTING (LOTS! let quickcheck generate widths, and bit values directly)
 -- Very slow Integer-implementation-agnostic hashing:
@@ -451,6 +462,18 @@ hash32BigNatBytes seed (BN# ba#) =
         numLimbs = szBytes `unsafeShiftR` LOG_SIZEOF_WORD
      in assert (numLimbs >= 1 && (numLimbs * SIZEOF_HSWORD) == szBytes) $
          hash32BigNatByteArrayBytes seed numLimbs ba
+
+
+-- | The @BigNat@'s value is represented in 32-bit chunks (at least one, for
+-- zero; but no more than necessary), then bytes are added to the hash from
+-- most to least significant (including all initial padding 0s). Finally
+-- @'mixConstructor' 0@ is called on the resulting hash value.
+--
+-- Exposed only in GHC 7.10.
+instance Hashable BigNat where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed = mixConstructor 0 . hash32BigNatBytes seed
+
 # endif
 
 
@@ -474,16 +497,48 @@ hash32BigNatByteArrayBytes seed numLimbs ba =
         -- handle dropping possibly-empty most-significant Word32, before
         -- processing remaining limbs:
         h0 = let mostSigLimb = P.indexByteArray ba mostSigLimbIx
-                 (word32_0, word32_1) = words32 mostSigLimb
-              in if word32_0 == 0 
-                  then hash32WithSalt seed word32_1
-                  else hash32WithSalt seed mostSigLimb
+              in _hash32SigWords32 seed (fromIntegral mostSigLimb)
         ix0 = mostSigLimbIx - 1
      in go h0 ix0
 #  endif
 
 #endif
 
+-- Also GHC 7.10:
+#if MIN_VERSION_base(4,8,0)
+-- | The @Natural@'s value is represented in 32-bit chunks (at least one, for
+-- zero; but no more than necessary), then bytes are added to the hash from
+-- most to least significant (including all initial padding 0s). Finally
+-- @'mixConstructor' 0@ is called on the resulting hash value.
+--
+-- Exposed only in GHC 7.10
+instance Hashable Natural where
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt seed nat = case nat of
+# if MIN_VERSION_integer_gmp(1,0,0)
+        -- For Word-size natural
+        (NatS# wd#) -> mixConstructor 0 $
+#         if WORD_SIZE_IN_BITS == 32
+            hash32WithSalt seed (W# wd#)
+#         else
+            _hash32SigWords32 seed (fromIntegral $ W# wd#)
+#         endif
+        -- Else using a BigNat (which instance calls required mixConstructor):
+        (NatJ# bn)  -> hash32WithSalt seed bn
+# else
+        -- Natural represented with non-negative Integer:
+        (Natural n) -> hash32WithSalt seed n
+# endif
+
+-- This is the instance in void-0.7:
+--
+-- | > hash32WithSalt _ _ = absurd
+--
+-- Exposed only in GHC 7.10
+instance Hashable Void where
+    hash32WithSalt _ = absurd
+
+#endif
 
 
 -- | Hash in numerator, then denominator.

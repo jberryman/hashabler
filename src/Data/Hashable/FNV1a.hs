@@ -47,15 +47,14 @@ module Data.Hashable.FNV1a
    constructor of our type
  .
  A final important note: we're not concerned with collisions between values of
- *different types*, even if those values are in some way "similar". This also
- means instances cannot rely on the hashing of child elements being
- uncorrelated. That might be one interpretation of the mistake in our faulty
- @Maybe@ instance above
+ *different types*; in fact in many cases "equivalent" values of different
+ types intentionally hash to the same value. This also means instances cannot
+ rely on the hashing of child elements being uncorrelated. That might be one
+ interpretation of the mistake in our faulty @Maybe@ instance above
  -}
  -- *** TODO notes on Generic deriving
     where
 
--- TODO note copy-pasta and thanks to Tibbe & Hashable
 
 import Data.Word
 import Data.Int
@@ -63,6 +62,7 @@ import Data.Bits
 import Data.Char
 import Data.List
 
+-- For ByteString & Text instances:
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Internal as B
 import qualified Data.ByteString.Lazy.Internal as BL (foldlChunks, ByteString)
@@ -102,10 +102,30 @@ import GHC.Fingerprint.Type(Fingerprint(..))
 import System.Mem.StableName
 import Data.Ratio (Ratio, denominator, numerator)
 
+-- For Integer:
+#ifdef VERSION_integer_gmp
+import GHC.Exts (Int(..))
+import GHC.Integer.GMP.Internals (Integer(..))
+# if MIN_VERSION_integer_gmp(1,0,0)
+import GHC.Integer.GMP.Internals (BigNat(BN#))
+# endif
+#endif
+
 -- For WORD_SIZE_IN_BITS constant:
 #include "MachDeps.h"
+-- Do error just once, and assume 32 else 64 below:
+#if WORD_SIZE_IN_BITS == 32
+-- for fast div by power of two:
+#define LOG_SIZEOF_WORD 2
+#elif WORD_SIZE_IN_BITS == 64
+#define LOG_SIZEOF_WORD 3
+#else
+#error We only know how to support 32-bit and 64-bit systems, sorry.
+#endif
+
 
 -- TODO SEE ALSO HASHABLE instances for base 4,8
+-- TODO BENCHMARKING for 'abs' see: http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs  and  http://stackoverflow.com/q/22445019/176841
 
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
 
@@ -117,6 +137,13 @@ foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt
 For test vectors:
     http://www.isthe.com/chongo/src/fnv/test_fnv.c
 -}
+
+-- TODO TESTING:
+--  have a dir of test vectors, separated into files for each type
+--  have a utility that both tests AND creates new vectors
+--  when generating new, have it first run a check, and complain with a warning message about bumping the major version if they differ.
+
+
 
 -- FNV CONSTANTS ----------------------------------------------------
 
@@ -207,12 +234,14 @@ bytes64 wd = ( shifted 56, shifted 48, shifted 40, shifted 32
 bytes64_alt :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
 {-# INLINE bytes64_alt #-}
 bytes64_alt wd = 
-    let wd0 = fromIntegral $ unsafeShiftR wd 32
-        wd1 = fromIntegral wd
+    let (wd0, wd1) = words32 wd
         (b0,b1,b2,b3) = bytes32 wd0
         (b4,b5,b6,b7) = bytes32 wd1
      in (b0,b1,b2,b3,b4,b5,b6,b7)
 
+words32 :: Word64 -> (Word32, Word32)
+{-# INLINE words32 #-}
+words32 wd64 = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
 
 -- These appear to return bytes in big endian on my machine (little endian),
 -- but need to verify what happens on a BE machine.
@@ -248,6 +277,8 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 
 -- TODO rename these methods:
 --        - rename seed -> hash, and use a newtype wrapper
+--          - make (<#) polymorphic for different size hash values
+--             (<#) :: Hash h=> h -> Word8 -> h
 --        - call it "combine" or "hashedWith" or "hasingIn"
 --        - possibly use (<#) operator
 --        - mention that we're "mixing right hand data into left-hand side hash"
@@ -292,9 +323,168 @@ class Hashable a where
 -- ------------------------------------------------------------------
 -- NUMERIC TYPES:
 
+-- TODO TESTING: make sure we test against many different serialized pos/neg/zero values here:
+-- TODO TESTING: these should match Word/Word32/Word64 hash values, followed by a mixConstructor 0
+-- TODO TESTING: for 7.8 and below, see if we can get a small value into J#, and then test that it hashes to the same as the literal small value
+--                (look at code; simple */div or +/- don't seem to do it)
+
+-- NOTE: non-obviously, but per our rule about variable-width values, this must
+-- also be wrapped in a `mixConstructor`; consider the hashes of (0xDEAD,
+-- 0xBEEF) and (0xDE, 0xADBEEF). The way we mix in the sign handles this.  -- TODO TESTING (this)
+-- 
+-- I would rather truncate to 8-bit "limbs" but using 32-bit limbs seems like a
+-- good tradeoff: on 64-bit platforms we just do a conditional instead of on
+-- avg 4 extra hash ops, and on 32-bit no extra work is required.
+--
+-- | Arbitrary-precision integers are hashed as follows: the magnitude is
+-- represented with 32-bit chunks (at least one, for zero; but no more than
+-- necessary), then bytes are added to the hash from most to least significant
+-- (including all initial padding 0s). Finally 'mixConstructor' is called on
+-- the resulting hash value, with @(1::Word8)@ if the @Integer@ was negative,
+-- otherwise with @0@.
 instance Hashable Integer where
-    -- GHC.Integer.GMP.Internals from integer-gmp (part of GHC distribution)
-    -- TODO be careful that Eq values hash to the same!
+-- integer-gmp implementation: --------------------------------------
+#if defined(VERSION_integer_gmp)
+    hash32WithSalt seed i = case i of
+      (S# n#) ->
+        let magWord :: Word
+            magWord = fromIntegral $ abs (I# n#)
+            sign = _signByte (I# n#)
+#      if WORD_SIZE_IN_BITS == 32
+         in mixConstructor sign $ hash32WithSalt seed magWord
+#      else
+            -- only hash enough 32-bit chunks as needed to represent magnitude:
+            (magWord32_0, magWord32_1) = words32 magWord
+         in mixConstructor sign $ 
+              if magWord32_0 == 0
+                 then hash32WithSalt seed magWord32_1
+                 else hash32WithSalt seed magWord
+#      endif
+
+-- GHC 7.10: ------------------------
+--
+#   if MIN_VERSION_integer_gmp(1,0,0)
+        -- NOTE: these used only when out of range of Int:
+      (Jp# bn) -> mixConstructor 0 $ hash32BigNatBytes seed bn
+      (Jn# bn) -> mixConstructor 1 $ hash32BigNatBytes seed bn
+
+-- GHC 7.8 and below: ---------------
+--
+-- J# is more or less directly the gmp arbitrary precision int type, where:
+--     1) sz# is number of limbs, or negative of that for negative
+--     2) limbs stored little endian (i.e. i[0] is least significant limb)
+--     3) whenever sz# is non-zero , the most significant limb is non-zero; the
+--        value 0 is represented by sz# == 0, in which case ba# is ignored
+--     4) a limb is machine Word size.
+-- And some Integer-specific caveats/notes:
+--     5) J# may be used for even small integers
+--     6) ba# may be over-allocated, so size should be ignored
+#   else
+--    Note, 5 and 3 together mean that we have to special case for sz == 0,
+--    even though I can't get that case to occur in practice:
+      (J# 0# _) -> mixConstructor 0 $ hash32WithSalt seed (0 :: Word32)
+      (J# sz# ba#) -> 
+         let numLimbs = abs (I# sz#)
+             sign = _signByte (I# sz#)
+          in mixConstructor sign $ 
+               hash32BigNatByteArrayBytes seed numLimbs (P.ByteArray ba#)
+#   endif
+
+-- other Integer implementations: -----------------------------------
+#else
+    -- For non-gmp Integer; quite slow.
+    hash32WithSalt = _hash32WithSaltInteger
+#endif
+
+
+-- TODO TESTING quickcheck against conditional
+-- TODO benchmark against conditional
+-- Helper to quickly (hopefully) extract sign bit (1 for negative, 0 otherwise)
+-- from Int. Assumes two's complement.
+_signByte :: Int -> Word8
+{-# INLINE _signByte #-}
+_signByte n = fromIntegral ((fromIntegral n :: Word) 
+                              `unsafeShiftR` (WORD_SIZE_IN_BITS - 1))
+
+
+-- TODO TESTING (LOTS! let quickcheck generate widths, and bit values directly)
+-- Very slow Integer-implementation-agnostic hashing:
+_hash32WithSaltInteger :: Word32 -> Integer -> Word32
+_hash32WithSaltInteger h i = 
+    let (sgn, limbs) = _integerWords i
+     in mixConstructor sgn $ 
+         foldl' hash32WithSalt h limbs
+
+-- Convert an opaque Integer into a gmp-like format, except that we order our
+-- list of limbs returned from most to least significant:
+_integerWords :: Integer -> (Word8, [Word32])
+_integerWords nSigned = (sign , go (abs nSigned) []) where
+    sign = if nSigned < 0 then 1 else 0
+           -- we will hash at least one limb (even if zero):
+    go nMag acc = let (nMag', w32) = splitAtLastWord nMag
+                   in (if nMag' == 0 then id else go nMag') (w32:acc)
+
+    splitAtLastWord :: Integer -> (Integer, Word32)
+    splitAtLastWord x = 
+      assert (x >= 0) $
+        (x `shiftR` 32, fromIntegral x)
+
+
+#ifdef VERSION_integer_gmp
+-- GHC 7.10:
+# if MIN_VERSION_integer_gmp(1,0,0)
+-- Internal. Hashable instances will require a 'mixConstructor'. We use the same
+-- chunks-of-32-bits scheme as in the Integer instance.
+--
+-- Invariants of BigNat (from docs):
+--   - ByteArray# size is an exact multiple of Word# size
+--   - limbs are stored in least-significant-limb-first order,
+--   - the most-significant limb must be non-zero, except for
+--      0 which is represented as a 1-limb.
+--      - NOTE, though: Jp#/Jn# in Integer on GHC 7.10 guarantee that contained
+--        BigNat are non-zero
+hash32BigNatBytes :: Word32 -> BigNat -> Word32
+{-# INLINE hash32BigNatBytes #-}
+hash32BigNatBytes seed (BN# ba#) = 
+    let ba = P.ByteArray ba#
+        szBytes = P.sizeofByteArray ba
+        numLimbs = szBytes `unsafeShiftR` LOG_SIZEOF_WORD
+     in assert (numLimbs >= 1 && (numLimbs * SIZEOF_HSWORD) == szBytes) $
+         hash32BigNatByteArrayBytes seed numLimbs ba
+# endif
+
+
+-- Hashing of internals of BigNat-format ByteArrays of at least 1 limb, for old
+-- and new style Integer from integer-gmp.
+hash32BigNatByteArrayBytes :: Word32 -> Int -> P.ByteArray -> Word32
+{-# INLINE hash32BigNatByteArrayBytes #-}
+hash32BigNatByteArrayBytes seed numLimbs ba = 
+  assert (numLimbs > 0) $
+    let mostSigLimbIx = numLimbs - 1
+        -- NOTE: to correctly handle small-endian, we must read in Word-size
+        -- chunks (not just Word32 size)
+        go !h (-1) = h
+        go !h !ix = let bytsBE = wordBytes $ P.indexByteArray ba ix
+                     in go (hash32WithSalt h bytsBE) (ix - 1)
+#  if WORD_SIZE_IN_BITS == 32
+        wordBytes = bytes32
+     in go seed mostSigLimbIx
+#  else
+        wordBytes = bytes64
+        -- handle dropping possibly-empty most-significant Word32, before
+        -- processing remaining limbs:
+        h0 = let mostSigLimb = P.indexByteArray ba mostSigLimbIx
+                 (word32_0, word32_1) = words32 mostSigLimb
+              in if word32_0 == 0 
+                  then hash32WithSalt seed word32_1
+                  else hash32WithSalt seed mostSigLimb
+        ix0 = mostSigLimbIx - 1
+     in go h0 ix0
+#  endif
+
+#endif
+
+
 
 -- | Hash in numerator, then denominator.
 instance (Integral a, Hashable a) => Hashable (Ratio a) where
@@ -312,14 +502,11 @@ instance (Integral a, Hashable a) => Hashable (Ratio a) where
 instance Hashable Int where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed i =
-#if WORD_SIZE_IN_BITS == 32
-      assert (P.sizeOf i == 4) $
+#     if WORD_SIZE_IN_BITS == 32
         hash32WithSalt seed (fromIntegral i :: Int32)
-#elif WORD_SIZE_IN_BITS == 64
+#     else
         _hash32WithSalt_Int_64 seed (fromIntegral i)
-#else
-#error We only know how to support 32-bit and 64-bit systems, sorry.
-#endif
+#     endif
 
 -- | @Word@ has architecture-specific size. When hashing on 64-bit machines if
 -- the @Word@ value to be hashed falls in the 32-bit Word range, we first cast
@@ -328,14 +515,11 @@ instance Hashable Int where
 instance Hashable Word where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed w =
-#if WORD_SIZE_IN_BITS == 32
-      assert (P.sizeOf w == 4) $
+#     if WORD_SIZE_IN_BITS == 32
         hash32WithSalt seed (fromIntegral w :: Word32)
-#elif WORD_SIZE_IN_BITS == 64
+#     else
         _hash32WithSalt_Word_64 seed (fromIntegral w)
-#else
-#error We only know how to support 32-bit and 64-bit systems, sorry.
-#endif
+#     endif
 
 -- we'll test these internals for equality in 32-bit Int range, against
 -- instance for Int32. TODO TESTING
@@ -420,6 +604,7 @@ instance Hashable Word64 where
 -- Since below have variable-length, we'll use this helper (which is also
 -- useful for multi-constructor types):
 
+-- TODO rename, or maybe just remove?
 mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
                -> Word32 -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
                -> Word32 -- ^ New hash value
@@ -443,11 +628,11 @@ instance Hashable BL.ByteString where
 -- | NOTE: hidden on bytestring < v0.10.4
 instance Hashable BSh.ShortByteString where
     hash32WithSalt seed  = 
-#if MIN_VERSION_base(4,3,0)
+#   if MIN_VERSION_base(4,3,0)
       \(BSh.SBS ba_) ->
-#else
+#   else
       \(BSh.SBS ba_ _) ->
-#endif
+#   endif
         let ba = P.ByteArray ba_
          in mixConstructor 0 $
               hashByteArray seed 0 (P.sizeofByteArray ba) ba
@@ -522,14 +707,14 @@ instance Hashable TypeRep where
 typeRepInt32 :: TypeRep -> Int32
 {-# INLINE typeRepInt32 #-}
 typeRepInt32 = 
-#if __GLASGOW_HASKELL__ >= 702
+# if __GLASGOW_HASKELL__ >= 702
     -- Fingerprint is just the MD5, so taking any Int from it is fine
     \(TypeRep (Fingerprint i64 _) _ _) -> fromIntegral i64
-#else
+# else
 -- okay at least in base < 4.4 && >= 4:
 -- THOUGH NOTE TODO: here the actual key may vary from run to run
     fromIntegral . unsafeDupablePerformIO . typeRepKey
-#endif
+# endif
 
 
 -- | No promise of stability across runs or platforms. Implemented via hashStableName
@@ -588,8 +773,13 @@ instance (Hashable a, Hashable b) => Hashable (Either a b) where
 -- ---------
 -- Tuples (product types)
 
+-- Per our rules, this must perturb the hash value by at least a byte, even
+-- though its value is entirely "fixed" by its type. Consider [()]; the
+-- instance relies on () following the rule.
+-- | > hash32WithSalt = const . mixConstructor 0
 instance Hashable () where
-    -- TODO I think this might be the only type that can be a NOOP
+    {-# INLINE hash32WithSalt #-}
+    hash32WithSalt = const . mixConstructor 0
 
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
     {-# INLINE hash32WithSalt #-}
@@ -634,6 +824,7 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 --   - bytes64 is very slow on 32-bit
 --   - TODO we could use SIMD vectors for wider than 32 hash bits!
 --      - but need to test that this is principled.
+--      - We don't have xor exposed in SIMD primops; instead try to target LLVM autovectorization?: http://llvm.org/docs/Vectorizers.html
 --
 -- TESTING NOTES:
 --   - test that Generic instances derived from identically-shaped types match in every way behavior of instances defined here

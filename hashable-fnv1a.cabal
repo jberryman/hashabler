@@ -5,7 +5,13 @@
 name:                hashable-fnv1a
 version:             0.1.0.0
 -- synopsis:            
--- description:         
+description:         
+    This package is a rewrite of the @hashable@ library by Milan Straka and
+    Johan Tibell, having the following goals:
+    .
+    - TODO
+    .
+
 homepage:            https://github.com/jberryman/hashable-fnv1a
 license:             BSD3
 license-file:        LICENSE
@@ -21,13 +27,13 @@ library
   exposed-modules:     Data.Hashable.FNV1a
   -- other-modules:       
   -- other-extensions:    
-                     -- TODO fix base constraint; needs to be at least 4.3 (for sizeofByteArray)
-  build-depends:       base >=4.7 && <5
+  build-depends:       base >=4.3 && <5
                      , array
                      , bytestring
                      , text
                      , primitive
                      , ghc-prim
+                     , integer-gmp >= 0.2
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options: -Wall -fwarn-tabs -O2 -funbox-strict-fields
@@ -44,6 +50,7 @@ benchmark bench
                      , bytestring
                      , text
                      , primitive
+                     , integer-gmp >= 0.2
                      -- Just Testing:
                      , ghc
                      , deepseq

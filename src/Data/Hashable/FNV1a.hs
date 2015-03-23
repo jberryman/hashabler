@@ -599,6 +599,8 @@ instance Hashable Double where
 -- GHC uses two's complement representation for signed ints; C has this
 -- undefined, I guess; just cast to Word and hash.
 
+-- TODO Why are Int operations slower than equivalent Word ops?
+
 instance Hashable Int8 where
     {-# INLINE hash32WithSalt #-}
     hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word8)
@@ -958,7 +960,7 @@ hashLeftUnfolded = go
 -- TODO TESTING make sure to test on bytestrings where off /= 0
 
 
--- TODO Factor out common code here:
+-- TODO MAYBE Factor out common code here and hashByteArray
 
 
 -- This is about twice as fast as a loop with single byte peeks:

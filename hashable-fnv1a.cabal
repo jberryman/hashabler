@@ -45,14 +45,10 @@ benchmark bench
   ghc-options:    -Wall -O2 -threaded -funbox-strict-fields
   hs-source-dirs: benchmarks
   build-depends:       base
-                     , criterion
-                     , hashable-fnv1a
+                     , array
                      , bytestring
                      , text
                      , primitive
-                     , integer-gmp >= 0.2
-                     -- Just Testing:
-                     , ghc
-                     , deepseq
-                     , largeword
-                     , array
+                     
+                     , hashable-fnv1a
+                     , criterion

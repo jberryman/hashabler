@@ -148,6 +148,10 @@ For test vectors:
 --  have a dir of test vectors, separated into files for each type
 --  have a utility that both tests AND creates new vectors
 --  when generating new, have it first run a check, and complain with a warning message about bumping the major version if they differ.
+--
+--  TODO TESTING HASH GOODNESS:
+--    - do scatter plot distribution graph thing from arbitrary quickcheck values.
+--    - compare with Hashable
 
 
 
@@ -189,28 +193,6 @@ infixl <#
 
 
 
--- UNROLLED 32-BIT HASHING OF DIFFERENT TYPES: ----------------------
-
--- TODO BENCHMARK hash32WithSalt against these and remove:
-hash32Word16 :: Word16 -> Word32
-{-# INLINE hash32Word16 #-}
-hash32Word16 wd = case (fromIntegral $ unsafeShiftR wd 8, fromIntegral wd) of 
-  (b0,b1)->
-    fnvOffsetBasis32 <# b0 <# b1
-
-hash32Word32 :: Word32 -> Word32
-{-# INLINE hash32Word32 #-}
-hash32Word32 wd = case bytes32 wd of 
-  (b0,b1,b2,b3)->
-    fnvOffsetBasis32 <# b0 <# b1 <# b2 <# b3
-
-hash32Word64 :: Word64 -> Word32
-{-# INLINE hash32Word64 #-}
-hash32Word64 wd = case bytes64_alt wd of
--- fnvInnerLoopTestWord64 wd = case bytes64 wd of  -- NOTE: SLOW ON 32-bit arch
-  (b0,b1,b2,b3,b4,b5,b6,b7) ->
-    fnvOffsetBasis32 <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7
-
 
 -- EXTRACTING BYTES FROM DIFFERENT TYPES ----------------------------
 -- NOTE we're to hash the resulting Word8s from left to right
@@ -250,7 +232,7 @@ words32 :: Word64 -> (Word32, Word32)
 words32 wd64 = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
 
 -- These appear to return bytes in big endian on my machine (little endian),
--- but need to verify what happens on a BE machine.
+-- but TODO verify what happens on a BE machine.
 
 -- Get raw IEEE bytes from floating point types.
 -- TODO better, if possible
@@ -970,14 +952,6 @@ hashLeftUnfolded = go
           -- This seems to be sweet spot on my machine:
           go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6) as
           go !h (a1:as) = go (h `hash32WithSalt` a1) as
-
-
--- BASELINE: a fused foldl' equivalent -- NOTE ~ 2x faster than Unfolded on 7.10
-hashLeftNoList :: Word32 -> Word8 -> Word32  -- NOTE: tested w/ this monomorphic sig
-{-# INLINE hashLeftNoList #-}
-hashLeftNoList = go
-    where go !h 0 = h
-          go !h !b = go (h `hash32WithSalt` b) (b-1)
 
 
 -- benchmark fetching bytes from bytestring in different ways -----------

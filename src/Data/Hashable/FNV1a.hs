@@ -12,8 +12,8 @@ module Data.Hashable.FNV1a
  distinct hash values*. Here's an example of a *bad* implementation for 'Maybe':
  .
  > instance (Hashable a)=> Hashable (Maybe a) where              -- BAD!
- >     hash32WithSalt h (Just a) = h `hash32WithSalt` a          -- BAD!
- >     hash32WithSalt h Nothing  = h `hash32WithSalt` (1::Word8) -- BAD!
+ >     hash h (Just a) = h `hash` a          -- BAD!
+ >     hash h Nothing  = h `hash` (1::Word8) -- BAD!
  .
  Here @Just (1::Word8)@ hashes to the same value as @Nothing@. TODO mention how we only can make those two assumptions about @a@ here
  .
@@ -168,26 +168,22 @@ fnvPrime64 = 1099511628211
 -- fnvPrime128 = 309485009821345068724781371
 -- fnvPrime256 = 374144419156711147060143317175368453031918731002211
 
--- The arbitrary initial seed values for different output hash sizes. These
+-- TODO move this doc to export list docs:
+-- | The arbitrary initial seed values for different output hash sizes. These
 -- values are part of the spec, but there is nothing special about them;
--- supposedly, in terms of hash quality, any non-zero value seed should be
--- fine:
+-- supposedly, in terms of hash quality, any non-zero value seed should be fine
+-- passed to 'hash':
 
-fnvOffsetBasis32 :: Word32
-fnvOffsetBasis64 :: Word64
+fnvOffsetBasis32 :: FNV32
+--fnvOffsetBasis64 :: FNV64
 {-# INLINE fnvOffsetBasis32 #-}
-{-# INLINE fnvOffsetBasis64 #-}
-fnvOffsetBasis32 = 2166136261
-fnvOffsetBasis64 = 14695981039346656037
--- fnvOffsetBasis128 = 144066263297769815596495629667062367629
--- fnvOffsetBasis256 = 100029257958052580907070968620625704837092796014241193945225284501741471925557
+--{-# INLINE fnvOffsetBasis64 #-}
+fnvOffsetBasis32 = FNV32 2166136261
+--fnvOffsetBasis64 = FNV64 14695981039346656037
+-- fnvOffsetBasis128 = FNV128 144066263297769815596495629667062367629
+-- fnvOffsetBasis256 = FNV256 100029257958052580907070968620625704837092796014241193945225284501741471925557
 
--- FNV HASH KERNELS -------------------------------------------------
 
-infixl <#
-(<#) :: Word32 -> Word8 -> Word32
-{-# INLINE (<#) #-}
-(<#) h32 b = (h32 `xor` fromIntegral b) * fnvPrime32
 
 -- TODO 64-bit hashing
 
@@ -263,50 +259,59 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
 
 
--- TODO rename these methods:
---        - rename seed -> hash, and use a newtype wrapper
---          - make (<#) polymorphic for different size hash values
---             (<#) :: Hash h=> h -> Word8 -> h
---        - call it "combine" or "hashedWith" or "hasingIn"
---        - possibly use (<#) operator
---        - mention that we're "mixing right hand data into left-hand side hash"
---
 -- TODO ENDIANNESS make a note and revisit instances: USE BIG ENDIAN (mostly because of network byte order)
 --        - e.g. see Double and Float
 
--- | A class of types that can be converted into a hash value. For relevant
--- instances of primitive types, we expect 'hash32' and 'hash64' to produce
--- values following the FNV1a spec. We expect all other instances to display
--- "good" hashing properties (w/r/t avalanche, bit independence, etc.) where
--- "good" is only evidenced by our test suite, for now.
+-- | A class of types that can be converted into a hash value.  We expect all
+-- instances to display "good" hashing properties (w/r/t avalanche, bit
+-- independence, etc.) when passed to a "good" 'Hash' function.
+--
+-- We try to ensure that bytes are extracted from values in a way that is
+-- portable across architectures (where possible), and straightforward to
+-- replicate on other platforms.
 --
 -- See the section "Defining Hashable instances" for details of what we expect
 -- from instances.
 class Hashable a where
-    -- | Produce a 32-bit hash value using the supplied seed. The seed should
-    -- be non-zero although this is not checked.
-    hash32WithSalt :: Word32 -> a -> Word32
-
-    -- TODO
-    -- | Produce a 64-bit hash value using the supplied seed. The seed should
-    -- be non-zero although this is not checked.
-  --hash64WithSalt :: Word64 -> a -> Word64
-
-    -- NOTE: these are just here so we can override them with faster
-    -- implementations, and pre-computed bits.
-
-    -- | Hash a value using the standard spec-prescribed 32-bit seed value.
+    -- | Add the bytes from the second argument into the hash, producing a new
+    -- hash value. This is essentially a left fold of the methods of 'Hash'
+    -- over individual bytes extracted from @a@.
     --
-    -- > hash32 = hash32WithSalt 2166136261
-    hash32 :: Hashable a=> a -> Word32
-    {-# INLINE hash32 #-}
-    hash32 a = hash32WithSalt fnvOffsetBasis32 a
-    
-    -- TODO
-    -- hash64 :: Hashable a=> a -> Word64
-  --{-# INLINE hash64 #-}
-  --hash64 a = hash64WithSalt fnvOffsetBasis64 a
+    -- This method might be a complete hashing algorithm, or might comprise the
+    -- core of a hashing algorithm (perhaps with some final mixing), or might
+    -- do something completely apart from hashing (e.g. simply cons bytes into
+    -- a list for debugging).
+    hash :: (Hash h)=> h -> a -> h
 
+
+infixl <#
+-- | A class for hash functions which take a running hash value and incremental
+-- mix in bytes (or chunks of bytes). Bytes are fed to these methods in our
+-- 'Hashable' instances.
+class Hash h where
+    (<#) :: h -> Word8 -> h
+    -- TODO for 2,4,8-tuples of Word8; with defaults all in terms of each other
+
+
+-- FNV HASH KERNELS -------------------------------------------------
+
+-- | The FNV-1a hash algorithm. See <http://www.isthe.com/chongo/tech/comp/fnv/>
+newtype FNV32 = FNV32 { fnv32 :: Word32 }
+
+-- | > (FNV32 h32) <# b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+instance Hash FNV32 where
+    {-# INLINE (<#) #-}
+    (FNV32 h32) <# b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+
+
+-- | Hash a value using the standard spec-prescribed 32-bit seed value.  For
+-- relevant instances of primitive types, we expect this to produce values
+-- following the FNV1a spec.
+--
+-- > hashFNV32 = hash fnvOffsetBasis32
+hashFNV32 :: Hashable a=> a -> FNV32
+{-# INLINE hashFNV32 #-}
+hashFNV32 a = hash fnvOffsetBasis32 a
 
 -- ------------------------------------------------------------------
 -- NUMERIC TYPES:
@@ -333,24 +338,24 @@ class Hashable a where
 instance Hashable Integer where
 -- integer-gmp implementation: --------------------------------------
 #if defined(VERSION_integer_gmp)
-    hash32WithSalt seed i = case i of
+    hash h i = case i of
       (S# n#) ->
         let magWord = fromIntegral $ abs (I# n#)
             sign = _signByte (I# n#)
          in mixConstructor sign $ 
 #           if WORD_SIZE_IN_BITS == 32
-              hash32WithSalt seed (magWord :: Word32)
+              hash h (magWord :: Word32)
 #           else
               -- only hash enough 32-bit chunks as needed to represent magnitude
-              _hash32SigWords32 seed magWord
+              _hash32SigWords32 h magWord
 #           endif
 
 -- GHC 7.10: ------------------------
 --
 #   if MIN_VERSION_integer_gmp(1,0,0)
         -- NOTE: these used only when out of range of Int:
-      (Jp# bn) -> mixConstructor 0 $ hash32BigNatBytes seed bn
-      (Jn# bn) -> mixConstructor 1 $ hash32BigNatBytes seed bn
+      (Jp# bn) -> mixConstructor 0 $ hash32BigNatBytes h bn
+      (Jn# bn) -> mixConstructor 1 $ hash32BigNatBytes h bn
 
 -- GHC 7.8 and below: ---------------
 --
@@ -366,18 +371,18 @@ instance Hashable Integer where
 #   else
 --    Note, 5 and 3 together mean that we have to special case for sz == 0,
 --    even though I can't get that case to occur in practice:
-      (J# 0# _) -> mixConstructor 0 $ hash32WithSalt seed (0 :: Word32)
+      (J# 0# _) -> mixConstructor 0 $ hash h (0 :: Word32)
       (J# sz# ba#) -> 
          let numLimbs = abs (I# sz#)
              sign = _signByte (I# sz#)
           in mixConstructor sign $ 
-               hash32BigNatByteArrayBytes seed numLimbs (P.ByteArray ba#)
+               hash32BigNatByteArrayBytes h numLimbs (P.ByteArray ba#)
 #   endif
 
 -- other Integer implementations: -----------------------------------
 #else
     -- For non-gmp Integer; quite slow.
-    hash32WithSalt = _hash32WithSaltInteger
+    hash = _hash32WithSaltInteger
 #endif
 
 
@@ -392,21 +397,21 @@ _signByte n = fromIntegral ((fromIntegral n :: Word)
 
 -- Helper for hashing a 64-bit word, possibly omiting the first 32-bit chunk
 -- (if 0). We use this when normalizing big natural representations.
-_hash32SigWords32 :: Word32 -> Word64 -> Word32
+_hash32SigWords32 :: (Hash h)=> h -> Word64 -> h
 {-# INLINE _hash32SigWords32 #-}
-_hash32SigWords32 seed w64 = 
+_hash32SigWords32 h w64 = 
      let (word32_0, word32_1) = words32 w64
       in if word32_0 == 0 
-          then hash32WithSalt seed word32_1
-          else hash32WithSalt seed w64
+          then hash h word32_1
+          else hash h w64
 
 -- TODO TESTING (LOTS! let quickcheck generate widths, and bit values directly)
 -- Very slow Integer-implementation-agnostic hashing:
-_hash32WithSaltInteger :: Word32 -> Integer -> Word32
+_hash32WithSaltInteger :: (Hash h)=> h -> Integer -> h
 _hash32WithSaltInteger h i = 
     let (sgn, limbs) = _integerWords i
      in mixConstructor sgn $ 
-         foldl' hash32WithSalt h limbs
+         foldl' hash h limbs
 
 -- Convert an opaque Integer into a gmp-like format, except that we order our
 -- list of limbs returned from most to least significant:
@@ -436,14 +441,14 @@ _integerWords nSigned = (sign , go (abs nSigned) []) where
 --      0 which is represented as a 1-limb.
 --      - NOTE, though: Jp#/Jn# in Integer on GHC 7.10 guarantee that contained
 --        BigNat are non-zero
-hash32BigNatBytes :: Word32 -> BigNat -> Word32
+hash32BigNatBytes :: (Hash h)=> h -> BigNat -> h
 {-# INLINE hash32BigNatBytes #-}
-hash32BigNatBytes seed (BN# ba#) = 
+hash32BigNatBytes h (BN# ba#) = 
     let ba = P.ByteArray ba#
         szBytes = P.sizeofByteArray ba
         numLimbs = szBytes `unsafeShiftR` LOG_SIZEOF_WORD
      in assert (numLimbs >= 1 && (numLimbs * SIZEOF_HSWORD) == szBytes) $
-         hash32BigNatByteArrayBytes seed numLimbs ba
+         hash32BigNatByteArrayBytes h numLimbs ba
 
 
 -- | The @BigNat@'s value is represented in 32-bit chunks (at least one, for
@@ -453,33 +458,33 @@ hash32BigNatBytes seed (BN# ba#) =
 --
 -- Exposed only in GHC 7.10.
 instance Hashable BigNat where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = mixConstructor 0 . hash32BigNatBytes seed
+    {-# INLINE hash #-}
+    hash h = mixConstructor 0 . hash32BigNatBytes h
 
 # endif
 
 
 -- Hashing of internals of BigNat-format ByteArrays of at least 1 limb, for old
 -- and new style Integer from integer-gmp.
-hash32BigNatByteArrayBytes :: Word32 -> Int -> P.ByteArray -> Word32
+hash32BigNatByteArrayBytes :: (Hash h)=> h -> Int -> P.ByteArray -> h
 {-# INLINE hash32BigNatByteArrayBytes #-}
-hash32BigNatByteArrayBytes seed numLimbs ba = 
+hash32BigNatByteArrayBytes h numLimbs ba = 
   assert (numLimbs > 0) $
     let mostSigLimbIx = numLimbs - 1
         -- NOTE: to correctly handle small-endian, we must read in Word-size
         -- chunks (not just Word32 size)
-        go !h (-1) = h
-        go !h !ix = let bytsBE = wordBytes $ P.indexByteArray ba ix
-                     in go (hash32WithSalt h bytsBE) (ix - 1)
+        go !h' (-1) = h'
+        go !h' !ix = let bytsBE = wordBytes $ P.indexByteArray ba ix
+                      in go (hash h' bytsBE) (ix - 1)
 #  if WORD_SIZE_IN_BITS == 32
         wordBytes = bytes32
-     in go seed mostSigLimbIx
+     in go h mostSigLimbIx
 #  else
         wordBytes = bytes64
         -- handle dropping possibly-empty most-significant Word32, before
         -- processing remaining limbs:
         h0 = let mostSigLimb = P.indexByteArray ba mostSigLimbIx
-              in _hash32SigWords32 seed (fromIntegral mostSigLimb)
+              in _hash32SigWords32 h (fromIntegral mostSigLimb)
         ix0 = mostSigLimbIx - 1
      in go h0 ix0
 #  endif
@@ -495,38 +500,38 @@ hash32BigNatByteArrayBytes seed numLimbs ba =
 --
 -- Exposed only in GHC 7.10
 instance Hashable Natural where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed nat = case nat of
+    {-# INLINE hash #-}
+    hash h nat = case nat of
 # if MIN_VERSION_integer_gmp(1,0,0)
         -- For Word-size natural
         (NatS# wd#) -> mixConstructor 0 $
 #         if WORD_SIZE_IN_BITS == 32
-            hash32WithSalt seed (W# wd#)
+            hash h (W# wd#)
 #         else
-            _hash32SigWords32 seed (fromIntegral $ W# wd#)
+            _hash32SigWords32 h (fromIntegral $ W# wd#)
 #         endif
         -- Else using a BigNat (which instance calls required mixConstructor):
-        (NatJ# bn)  -> hash32WithSalt seed bn
+        (NatJ# bn)  -> hash h bn
 # else
         -- Natural represented with non-negative Integer:
-        (Natural n) -> hash32WithSalt seed n
+        (Natural n) -> hash h n
 # endif
 
 -- This is the instance in void-0.7:
 --
--- | > hash32WithSalt _ _ = absurd
+-- | > hash _ _ = absurd
 --
 -- Exposed only in GHC 7.10
 instance Hashable Void where
-    hash32WithSalt _ = absurd
+    hash _ = absurd
 
 #endif
 
 
 -- | Hash in numerator, then denominator.
 instance (Integral a, Hashable a) => Hashable (Ratio a) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt s a = s `hash32WithSalt` numerator a `hash32WithSalt` denominator a
+    {-# INLINE hash #-}
+    hash s a = s `hash` numerator a `hash` denominator a
 
 
 -- ---------
@@ -537,12 +542,12 @@ instance (Integral a, Hashable a) => Hashable (Ratio a) where
 -- to an Int32. This should help ensure that programs that are correct across
 -- architectures will also produce the same hash values.
 instance Hashable Int where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed i =
+    {-# INLINE hash #-}
+    hash h i =
 #     if WORD_SIZE_IN_BITS == 32
-        hash32WithSalt seed (fromIntegral i :: Int32)
+        hash h (fromIntegral i :: Int32)
 #     else
-        _hash32WithSalt_Int_64 seed (fromIntegral i)
+        _hash32WithSalt_Int_64 h (fromIntegral i)
 #     endif
 
 -- | @Word@ has architecture-specific size. When hashing on 64-bit machines if
@@ -550,12 +555,12 @@ instance Hashable Int where
 -- it to a Word32. This should help ensure that programs that are correct
 -- across architectures will also produce the same hash values.
 instance Hashable Word where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed w =
+    {-# INLINE hash #-}
+    hash h w =
 #     if WORD_SIZE_IN_BITS == 32
-        hash32WithSalt seed (fromIntegral w :: Word32)
+        hash h (fromIntegral w :: Word32)
 #     else
-        _hash32WithSalt_Word_64 seed (fromIntegral w)
+        _hash32WithSalt_Word_64 h (fromIntegral w)
 #     endif
 
 -- we'll test these internals for equality in 32-bit Int range, against
@@ -563,77 +568,82 @@ instance Hashable Word where
 
 -- NOTE: the expressions in the conditionals alone make these quite slow on
 --       32-bit machines, so don't worry about benchmarking this directly.
-_hash32WithSalt_Int_64 :: Word32 -> Int64 -> Word32
+_hash32WithSalt_Int_64 :: (Hash h)=> h -> Int64 -> h
 {-# INLINE _hash32WithSalt_Int_64 #-}
 _hash32WithSalt_Int_64 h = \i->
     -- Can we losslessly cast to 32-bit representation?
     if abs i <= (fromIntegral (maxBound :: Int32))
-        then hash32WithSalt h (fromIntegral i :: Int32)
-        else hash32WithSalt h i
+        then hash h (fromIntegral i :: Int32)
+        else hash h i
 
-_hash32WithSalt_Word_64 :: Word32 -> Word64 -> Word32
+_hash32WithSalt_Word_64 :: (Hash h)=> h -> Word64 -> h
 {-# INLINE _hash32WithSalt_Word_64 #-}
 _hash32WithSalt_Word_64 h = \w->
     -- Can we losslessly cast to 32-bit representation?
     if w <= (fromIntegral (maxBound :: Word32))
-        then hash32WithSalt h (fromIntegral w :: Word32)
-        else hash32WithSalt h w
+        then hash h (fromIntegral w :: Word32)
+        else hash h w
 
 
 
 -- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly
 -- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Float where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed x = assert (isIEEE x) $
-        hash32WithSalt seed $ bytesFloat x
+    {-# INLINE hash #-}
+    hash h x = assert (isIEEE x) $
+        hash h $ bytesFloat x
 
 -- | Hash a Double as IEEE 754 double-precision format bytes. This is terribly
 -- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Double where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed x = assert (isIEEE x) $
-        hash32WithSalt seed $ bytesDouble x
+    {-# INLINE hash #-}
+    hash h x = assert (isIEEE x) $
+        hash h $ bytesDouble x
 
 
 -- GHC uses two's complement representation for signed ints; C has this
 -- undefined, I guess; just cast to Word and hash.
 
+-- TODO TESTING: spot test a few literal Words of all sizes for sanity:
+--                 hash (0xDE,0xAD) == hash 0xDEAD
+--               then run the same, converting to Int types (with fromIntegral) and testing equality.
+--               We could even have quickcheck provide hex chars, and we concat and read them to get these vals
 -- TODO Why are Int operations slower than equivalent Word ops?
+--      We should be able to unsafeCoerce Int -> Word, but can't do that directly with smaller sizes.
 
 instance Hashable Int8 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word8)
+    {-# INLINE hash #-}
+    hash h i = hash h (fromIntegral i :: Word8)
 
 instance Hashable Int16 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word16)
+    {-# INLINE hash #-}
+    hash h i = hash h (fromIntegral i :: Word16)
 
 instance Hashable Int32 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word32)
+    {-# INLINE hash #-}
+    hash h i = hash h (fromIntegral i :: Word32)
 
 instance Hashable Int64 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed i = hash32WithSalt seed (fromIntegral i :: Word64)
+    {-# INLINE hash #-}
+    hash h i = hash h (fromIntegral i :: Word64)
 
 -- Straightforward hashing of different Words and byte arrays:
 
 instance Hashable Word8 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt = (<#)
+    {-# INLINE hash #-}
+    hash = (<#)
 
 instance Hashable Word16 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = hash32WithSalt seed . bytes16
+    {-# INLINE hash #-}
+    hash h = hash h . bytes16
 
 instance Hashable Word32 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = hash32WithSalt seed . bytes32
+    {-# INLINE hash #-}
+    hash h = hash h . bytes32
 
 instance Hashable Word64 where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = hash32WithSalt seed . bytes64_alt    -- TODO CONDITIONAL on arch
+    {-# INLINE hash #-}
+    hash h = hash h . bytes64_alt    -- TODO CONDITIONAL on arch
 
 
 -- ------------------------------------------------------------------
@@ -644,29 +654,30 @@ instance Hashable Word64 where
 -- useful for multi-constructor types):
 
 -- TODO rename, or maybe just remove?
-mixConstructor :: Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
-               -> Word32 -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
-               -> Word32 -- ^ New hash value
+mixConstructor :: (Hash h)
+               => Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
+               -> h -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
+               -> h -- ^ New hash value
 {-# INLINE mixConstructor #-}
 mixConstructor n = (<# (0xFF - n))
 
 -- | Strict @ByteString@
 instance Hashable B.ByteString where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = mixConstructor 0 .
-        hashBytesUnrolled64 seed
+    {-# INLINE hash #-}
+    hash h = mixConstructor 0 .
+        hashBytesUnrolled64 h
 
 -- TODO benchmarks for fusion:
 -- | Lazy @ByteString@
 instance Hashable BL.ByteString where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = mixConstructor 0 .
-        BL.foldlChunks hashBytesUnrolled64 seed
+    {-# INLINE hash #-}
+    hash h = mixConstructor 0 .
+        BL.foldlChunks hashBytesUnrolled64 h
 
 #if MIN_VERSION_bytestring(0,10,4)
 -- | NOTE: hidden on bytestring < v0.10.4
 instance Hashable BSh.ShortByteString where
-    hash32WithSalt seed  = 
+    hash h  = 
 #   if MIN_VERSION_base(4,3,0)
       \(BSh.SBS ba_) ->
 #   else
@@ -674,21 +685,21 @@ instance Hashable BSh.ShortByteString where
 #   endif
         let ba = P.ByteArray ba_
          in mixConstructor 0 $
-              hashByteArray seed 0 (P.sizeofByteArray ba) ba
+              hashByteArray h 0 (P.sizeofByteArray ba) ba
 #endif
 
 -- | Strict @Text@, hashed as big endian UTF-16.
 instance Hashable T.Text where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = mixConstructor 0 .
-        hashText seed
+    {-# INLINE hash #-}
+    hash h = mixConstructor 0 .
+        hashText h
 
 -- TODO benchmarks for fusion:
 -- | Lazy @Text@, hashed as big endian UTF-16.
 instance Hashable TL.Text where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = mixConstructor 0 .
-        TL.foldlChunks hashText seed
+    {-# INLINE hash #-}
+    hash h = mixConstructor 0 .
+        TL.foldlChunks hashText h
 
 -- | Here we hash each byte of the array in turn. If using this to hash some
 -- data stored internally as a @ByteArray#@, be aware that depending on the
@@ -696,9 +707,9 @@ instance Hashable TL.Text where
 -- your machine, this might result in different hash values across different
 -- architectures.
 instance Hashable P.ByteArray where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = \ba-> mixConstructor 0 $
-        hashByteArray seed 0 (P.sizeofByteArray ba) ba
+    {-# INLINE hash #-}
+    hash h = \ba-> mixConstructor 0 $
+        hashByteArray h 0 (P.sizeofByteArray ba) ba
 
 -- ------------------------------------------------------------------
 -- MISC THINGS:
@@ -713,18 +724,18 @@ instance Hashable P.ByteArray where
 -- reserved unicode range U+D800 to U+DFFF; these Char values are added to the
 -- hash just as if they were valid 16-bit characters.
 instance Hashable Char where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = go where
+    {-# INLINE hash #-}
+    hash h = go where
       -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
     --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
       go c | n < 0x10000 =
                let (b0,b1) = bytes16 $ fromIntegral n
-                in seed <# b0 <# b1
+                in h <# b0 <# b1
 
            | otherwise =
                let (b0,b1) = bytes16 lo
                    (b2,b3) = bytes16 hi
-                in seed <# b0 <# b1 <# b2 <# b3
+                in h <# b0 <# b1 <# b2 <# b3
 
         where n = ord c
               m = n - 0x10000
@@ -733,13 +744,13 @@ instance Hashable Char where
 
 
 instance Hashable ThreadId where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = \(ThreadId tid)-> 
-        hash32WithSalt seed (fromIntegral $ getThreadId tid :: Word)
+    {-# INLINE hash #-}
+    hash h = \(ThreadId tid)-> 
+        hash h (fromIntegral $ getThreadId tid :: Word)
 
 instance Hashable TypeRep where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = hash32WithSalt seed . typeRepInt32
+    {-# INLINE hash #-}
+    hash h = hash h . typeRepInt32
 
 -- TODO TEST IF THESE SEEM TO BE CONSISTENT ACROSS RUNS AND MACHINES (AND DIFFERENT VERSIONS OF BASE >= 7.2)
 --      AND CONSIDER REMOVING SOME CONDITIONS.
@@ -758,8 +769,8 @@ typeRepInt32 =
 
 -- | No promise of stability across runs or platforms. Implemented via hashStableName
 instance Hashable (StableName a) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = hash32WithSalt seed . hashStableName
+    {-# INLINE hash #-}
+    hash h = hash h . hashStableName
     
 
 
@@ -771,42 +782,34 @@ instance Hashable (StableName a) where
 -- Sum types
 
 -- TODO REVISIT
--- | 'True' hashes to @'hash32' (1::Word8)@, 'False' hashes to @'hash32' (0::Word8)@
--- TODO or use fromBool/toBool from Foreign.Marshal.Utils (why?)
+-- | 'True' hashes to @'hashFNV32' (1::Word8)@, 'False' hashes to @'hashFNV32'
+-- (0::Word8)@ TODO or use fromBool/toBool from Foreign.Marshal.Utils (why?)
 instance Hashable Bool where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed b
-       | b         = hash32WithSalt seed (1::Word8) 
-       | otherwise = hash32WithSalt seed (0::Word8) -- TODO we could omit the xor here.
-
-    -- TODO: actually is it even useful to have these static implementations?
-    -- These small-universe types are not going to be useful at the top level,
-    -- only as leaves or components of products. TODO REMOVE FROM CLASS
-    {-# INLINE hash32 #-}
-    hash32 b = 
-        let h = if b then 67918732 else 84696351
-         in assert (h == hash32WithSalt fnvOffsetBasis32 b) h
+    {-# INLINE hash #-}
+    hash h b
+       | b         = hash h (1::Word8) 
+       | otherwise = hash h (0::Word8) -- TODO we could omit the xor here.
 
 
 instance Hashable Ordering where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = flip mixConstructor seed . fromIntegral . fromEnum
+    {-# INLINE hash #-}
+    hash h = flip mixConstructor h . fromIntegral . fromEnum
 
 instance Hashable a => Hashable [a] where
     -- TODO OPTIMIZE (see notes below)
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = mixConstructor 0 .
-        hashFoldl' seed
+    {-# INLINE hash #-}
+    hash h = mixConstructor 0 .
+        hashFoldl' h
 
 instance Hashable a => Hashable (Maybe a) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed Nothing  = mixConstructor 0 seed
-    hash32WithSalt seed (Just a) = mixConstructor 1 $ hash32WithSalt seed a
+    {-# INLINE hash #-}
+    hash h Nothing  = mixConstructor 0 h
+    hash h (Just a) = mixConstructor 1 $ hash h a
         
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed = either (h 0) (h 1) where
-        h n = mixConstructor n . hash32WithSalt seed
+    {-# INLINE hash #-}
+    hash h = either (mx 0) (mx 1) where
+        mx n = mixConstructor n . hash h
 
 
 -- ---------
@@ -815,38 +818,38 @@ instance (Hashable a, Hashable b) => Hashable (Either a b) where
 -- Per our rules, this must perturb the hash value by at least a byte, even
 -- though its value is entirely "fixed" by its type. Consider [()]; the
 -- instance relies on () following the rule.
--- | > hash32WithSalt = const . mixConstructor 0
+-- | > hash = const . mixConstructor 0
 instance Hashable () where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt = const . mixConstructor 0
+    {-# INLINE hash #-}
+    hash = const . mixConstructor 0
 
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b) = seed `hash32WithSalt` a `hash32WithSalt` b
+    {-# INLINE hash #-}
+    hash h (a,b) = h `hash` a `hash` b
     
 instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b,c) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c
+    {-# INLINE hash #-}
+    hash h (a,b,c) = h `hash` a `hash` b `hash` c
 
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4) => Hashable (a1, a2, a3, a4) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b,c,d) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d
+    {-# INLINE hash #-}
+    hash h (a,b,c,d) = h `hash` a `hash` b `hash` c `hash` d
 
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5) => Hashable (a1, a2, a3, a4, a5) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b,c,d,e) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e
+    {-# INLINE hash #-}
+    hash h (a,b,c,d,e) = h `hash` a `hash` b `hash` c `hash` d `hash` e
 
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6) => Hashable (a1, a2, a3, a4, a5, a6) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b,c,d,e,f) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e `hash32WithSalt` f
+    {-# INLINE hash #-}
+    hash h (a,b,c,d,e,f) = h `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f
 
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7) => Hashable (a1, a2, a3, a4, a5, a6, a7) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b,c,d,e,f,g) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e `hash32WithSalt` f `hash32WithSalt` g
+    {-# INLINE hash #-}
+    hash h (a,b,c,d,e,f,g) = h `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g
 
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7, Hashable a8) => Hashable (a1, a2, a3, a4, a5, a6, a7, a8) where
-    {-# INLINE hash32WithSalt #-}
-    hash32WithSalt seed (a,b,c,d,e,f,g,h) = seed `hash32WithSalt` a `hash32WithSalt` b `hash32WithSalt` c `hash32WithSalt` d `hash32WithSalt` e `hash32WithSalt` f `hash32WithSalt` g `hash32WithSalt` h
+    {-# INLINE hash #-}
+    hash hsh (a,b,c,d,e,f,g,h) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h
 
 -- NOTES:
 --   - no overhead from fromIntegral
@@ -937,23 +940,23 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 -- 7.8
 --   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  8.938 μs  -- NOTE: in general, 7.8 seems to do poorly applying folds to this in the context of criterion benchmarks
 --   APPLIED TO ([1.. 250 :: Word8])                  846.5 ns
-hashFoldl' :: Hashable a=> Word32 -> [a] -> Word32
+hashFoldl' :: (Hashable a, Hash h)=> h -> [a] -> h
 -- hashFoldl' :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
 {-# INLINE hashFoldl' #-}
-hashFoldl' = foldl' (\h' a-> h' `hash32WithSalt` a)
+hashFoldl' = foldl' (\h' a-> h' `hash` a)
 
 -- 7.10
 --   APPLIED TO ([1.. 250 :: Word8])                  675.6 ns
 -- 7.8
 --   APPLIED TO ([1.. 250 :: Word8])                  729.6 ns
-hashLeftUnfolded :: Hashable a=> Word32 -> [a] -> Word32
+hashLeftUnfolded :: (Hashable a, Hash h)=> h -> [a] -> h
 -- hashLeftUnfolded :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
 {-# INLINE hashLeftUnfolded #-}
 hashLeftUnfolded = go
     where go !h [] = h
           -- This seems to be sweet spot on my machine:
-          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash32WithSalt` a1 `hash32WithSalt` a2 `hash32WithSalt` a3 `hash32WithSalt` a4 `hash32WithSalt` a5 `hash32WithSalt` a6) as
-          go !h (a1:as) = go (h `hash32WithSalt` a1) as
+          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash` a1 `hash` a2 `hash` a3 `hash` a4 `hash` a5 `hash` a6) as
+          go !h (a1:as) = go (h `hash` a1) as
 
 
 -- benchmark fetching bytes from bytestring in different ways -----------
@@ -964,7 +967,7 @@ hashLeftUnfolded = go
 
 
 -- This is about twice as fast as a loop with single byte peeks:
-hashBytesUnrolled64 :: Word32 -> B.ByteString -> Word32
+hashBytesUnrolled64 :: (Hash h)=> h -> B.ByteString -> h
 {-# INLINE hashBytesUnrolled64 #-}
 hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
       withForeignPtr fp $ \base ->
@@ -1005,7 +1008,7 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
 -- NOTE: we can't simply call hashByteArray here; Text is stored as
 -- machine-endian UTF-16 (as promised by public Data.Text.Foreign), so we need
 -- to read Word16 here in order to hash as Big-Endian UTF-16.
-hashText :: Word32 -> T.Text -> Word32
+hashText :: (Hash h)=> h -> T.Text -> h
 {-# INLINE hashText #-}
 hashText h = \(T.Text (T.Array ba_) off lenWord16) -> 
     let ba = P.ByteArray ba_
@@ -1032,7 +1035,7 @@ hashText h = \(T.Text (T.Array ba_) off lenWord16) ->
      in hash4Word16sLoop h off 
 
 
-hashByteArray :: Word32 -> Int -> Int -> P.ByteArray -> Word32
+hashByteArray :: (Hash h)=> h -> Int -> Int -> P.ByteArray -> h
 {-# INLINE hashByteArray #-}
 hashByteArray h !off !lenBytes ba = 
     let !bytesRem = lenBytes .&. 7         -- lenBytes `mod` 8

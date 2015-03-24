@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric,StandaloneDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Main ( 
     main
    ) where
@@ -15,23 +16,24 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Primitive as P
+import Control.DeepSeq
 
-
+instance NFData FNV32 where rnf = rnf . fnv32 
 
 -- BASELINE for list instances: 
 -- a fused foldl' equivalent -- NOTE ~ 2x faster than Unfolded on 7.10
-hashLeftNoList :: Word32 -> Word8 -> Word32  -- NOTE: tested w/ this monomorphic sig
+hashLeftNoList :: FNV32 -> Word8 -> Word32  -- NOTE: tested w/ this monomorphic sig
 {-# INLINE hashLeftNoList #-}
 hashLeftNoList = go
-    where go !h 0 = h
-          go !h !b = go (h `hash32WithSalt` b) (b-1)
+    where go !h 0 = fnv32 h
+          go !h !b = go (h `hash` b) (b-1)
 
 hash32Times :: Hashable a=> Int -> a -> Word32
 {-# INLINE hash32Times #-}
 hash32Times iters =
   \a->  let go !h !0 = h
-            go !h !n = go (h `hash32WithSalt` a) (n-1)
-         in go fnvOffsetBasis32 iters 
+            go !h !n = go (h `hash` a) (n-1)
+         in fnv32 $ go fnvOffsetBasis32 iters 
 
 main :: IO ()
 main = do
@@ -76,7 +78,7 @@ main = do
         -- We can more or less subtract this from benchmarks producing a Word32 hash:
 
         bench "baseline Word32" $ nf (\x-> x) (777::Word32)
-      , bgroup "hash32 on small primitive values x100" [
+      , bgroup "hashFNV32 on small primitive values x100" [
           -- platform-dependent:
             bench "Int" $ nf (hash32Times 100) (9999::Int)
           , bench "Word" $ nf (hash32Times 100) (9999::Word)
@@ -118,19 +120,19 @@ main = do
           , bench "(,,,,,,,)" $ nf (hash32Times 100) (byt,byt,byt,byt,byt,byt,byt,byt)
           ]
 
-      , bgroup "Array types" [
-            bench "hash32 (strict ByteString x50)" $ nf hash32 bs50 
+      , bgroup "hashFNV32 on array types" [
+            bench "strict ByteString x50" $ nf hashFNV32 bs50 
           -- ought to be same as above:
-          , bench "hash32 (trivial lazy ByteString x50)" $ nf hash32 bs50LazyTrivial
-          , bench "hash32 (Text x50)" $ nf hash32 t50
+          , bench "trivial lazy ByteString x50" $ nf hashFNV32 bs50LazyTrivial
+          , bench "Text x50" $ nf hashFNV32 t50
           -- ought to be same as above:
-          , bench "hash32 (trivial lazy Text x50)" $ nf hash32 t50LazyTrivial
-          , bench "hash32 (ByteArray x50)" $ nf hash32 ba50
+          , bench "trivial lazy Text x50" $ nf hashFNV32 t50LazyTrivial
+          , bench "ByteArray x50" $ nf hashFNV32 ba50
 
-          , bench "hash32 (strict ByteString x1000)" $ nf hash32 bs1000
-          , bench "hash32 (lazy ByteString x1000, in 20 chunks)" $ nf hash32 bs1000Lazy_by20Chunks
-          , bench "hash32 (Text x1000)" $ nf hash32 t1000
-          , bench "hash32 (lazy Text x1000, in 20 chunks)" $ nf hash32 t1000Lazy_by20Chunks
+          , bench "strict ByteString x1000" $ nf hashFNV32 bs1000
+          , bench "lazy ByteString x1000, in 20 chunks" $ nf hashFNV32 bs1000Lazy_by20Chunks
+          , bench "Text x1000" $ nf hashFNV32 t1000
+          , bench "lazy Text x1000, in 20 chunks" $ nf hashFNV32 t1000Lazy_by20Chunks
           -- TODO Integer of comparable size to above
           -- TODO BigNat on GHC 7.10
           -- TODO Natural on GHC 7.10

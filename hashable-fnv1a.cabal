@@ -52,3 +52,4 @@ benchmark bench
                      
                      , hashable-fnv1a
                      , criterion
+                     , deepseq

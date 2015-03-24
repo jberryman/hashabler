@@ -2,9 +2,30 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash , UnliftedFFITypes #-}
-module Data.Hashable.FNV1a 
+module Data.Hashable.FNV1a (
+    Hashable(..)
+  , Hash(..)
+  -- * Hashing with the FNV-1a algorithm
+  , FNV32(..)
+  , FNV64(..)
+  , hashFNV32
+  -- ** Internals
+  -- *** FNV Primes
+  , fnvPrime32
+  , fnvPrime64
+  -- *** Standard seed values
+  -- | The arbitrary initial seed values for different output hash sizes. These
+  -- values are part of the spec, but there is nothing special about them;
+  -- supposedly, in terms of hash quality, any non-zero value seed should be
+  -- fine passed to 'hash':
+  , fnvOffsetBasis32
+  , fnvOffsetBasis64
 
--- ** Defining principled Hashable instances
+  -- INTERNALS FOR TESTING. TODO REMOVE
+  , hashFoldl'
+  , hashLeftUnfolded
+
+  -- * Defining principled Hashable instances
 {- | 
  Special care needs to be taken when defining instances of Hashable for your
  own types, especially for recursive types and types with multiple
@@ -53,7 +74,7 @@ module Data.Hashable.FNV1a
  interpretation of the mistake in our faulty @Maybe@ instance above
  -}
  -- *** TODO notes on Generic deriving
-    where
+    ) where
 
 
 import Data.Word
@@ -168,22 +189,21 @@ fnvPrime64 = 1099511628211
 -- fnvPrime128 = 309485009821345068724781371
 -- fnvPrime256 = 374144419156711147060143317175368453031918731002211
 
--- TODO move this doc to export list docs:
--- | The arbitrary initial seed values for different output hash sizes. These
--- values are part of the spec, but there is nothing special about them;
--- supposedly, in terms of hash quality, any non-zero value seed should be fine
--- passed to 'hash':
 
 fnvOffsetBasis32 :: FNV32
---fnvOffsetBasis64 :: FNV64
+fnvOffsetBasis64 :: FNV64
 {-# INLINE fnvOffsetBasis32 #-}
---{-# INLINE fnvOffsetBasis64 #-}
+{-# INLINE fnvOffsetBasis64 #-}
 fnvOffsetBasis32 = FNV32 2166136261
---fnvOffsetBasis64 = FNV64 14695981039346656037
+fnvOffsetBasis64 = FNV64 14695981039346656037
 -- fnvOffsetBasis128 = FNV128 144066263297769815596495629667062367629
 -- fnvOffsetBasis256 = FNV256 100029257958052580907070968620625704837092796014241193945225284501741471925557
 
 
+-- | The FNV-1a hash algorithm. See <http://www.isthe.com/chongo/tech/comp/fnv/>
+newtype FNV32 = FNV32 { fnv32 :: Word32 }
+
+newtype FNV64 = FNV64 { fnv64 :: Word64 }
 
 -- TODO 64-bit hashing
 
@@ -295,9 +315,6 @@ class Hash h where
 
 -- FNV HASH KERNELS -------------------------------------------------
 
--- | The FNV-1a hash algorithm. See <http://www.isthe.com/chongo/tech/comp/fnv/>
-newtype FNV32 = FNV32 { fnv32 :: Word32 }
-
 -- | > (FNV32 h32) <# b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
 instance Hash FNV32 where
     {-# INLINE (<#) #-}
@@ -308,7 +325,9 @@ instance Hash FNV32 where
 -- relevant instances of primitive types, we expect this to produce values
 -- following the FNV1a spec.
 --
--- > hashFNV32 = hash fnvOffsetBasis32
+-- @
+--   hashFNV32 = 'hash' 'fnvOffsetBasis32'
+-- @
 hashFNV32 :: Hashable a=> a -> FNV32
 {-# INLINE hashFNV32 #-}
 hashFNV32 a = hash fnvOffsetBasis32 a

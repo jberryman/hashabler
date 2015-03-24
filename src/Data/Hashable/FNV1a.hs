@@ -355,9 +355,10 @@ hashFNV32 a = hash fnvOffsetBasis32 a
 -- the resulting hash value, with @(1::Word8)@ if the @Integer@ was negative,
 -- otherwise with @0@.
 instance Hashable Integer where
+    {-# INLINE hash #-}
 -- integer-gmp implementation: --------------------------------------
 #if defined(VERSION_integer_gmp)
-    hash h i = case i of
+    hash h = \i-> case i of
       (S# n#) ->
         let magWord = fromIntegral $ abs (I# n#)
             sign = _signByte (I# n#)

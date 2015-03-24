@@ -330,7 +330,7 @@ instance Hash FNV32 where
 -- @
 hashFNV32 :: Hashable a=> a -> FNV32
 {-# INLINE hashFNV32 #-}
-hashFNV32 a = hash fnvOffsetBasis32 a
+hashFNV32 = hash fnvOffsetBasis32
 
 -- ------------------------------------------------------------------
 -- NUMERIC TYPES:
@@ -679,7 +679,7 @@ mixConstructor :: (Hash h)
                -> h -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
                -> h -- ^ New hash value
 {-# INLINE mixConstructor #-}
-mixConstructor n = (<# (0xFF - n))
+mixConstructor n = \h-> h <# (0xFF - n)
 
 -- | Strict @ByteString@
 instance Hashable B.ByteString where
@@ -697,6 +697,7 @@ instance Hashable BL.ByteString where
 #if MIN_VERSION_bytestring(0,10,4)
 -- | NOTE: hidden on bytestring < v0.10.4
 instance Hashable BSh.ShortByteString where
+    {-# INLINE hash #-}
     hash h  = 
 #   if MIN_VERSION_base(4,3,0)
       \(BSh.SBS ba_) ->

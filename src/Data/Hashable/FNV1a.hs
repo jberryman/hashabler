@@ -153,6 +153,9 @@ import GHC.Exts (Word(..))
 
 
 -- TODO BENCHMARKING for 'abs' see: http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs  and  http://stackoverflow.com/q/22445019/176841
+-- TODO BENCHMARKING look at fromIntegrals:
+--                    - try replacing with unsafeCoerce: smaller to bigger word, 
+--                    - AND zero initial bytes and unsafeCoerce for getting lowest byte of Word
 
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
 
@@ -172,6 +175,8 @@ For test vectors:
 --
 --  TODO TESTING HASH GOODNESS:
 --    - do scatter plot distribution graph thing from arbitrary quickcheck values.
+--      - Int, (Int,Int) , [Char], [Either Int Bool]
+--    - also count collisions
 --    - compare with Hashable
 
 
@@ -297,10 +302,10 @@ class Hashable a where
     -- hash value. This is essentially a left fold of the methods of 'Hash'
     -- over individual bytes extracted from @a@.
     --
-    -- This method might be a complete hashing algorithm, or might comprise the
-    -- core of a hashing algorithm (perhaps with some final mixing), or might
-    -- do something completely apart from hashing (e.g. simply cons bytes into
-    -- a list for debugging).
+    -- For some instances of 'Hash', this method might be a complete hashing
+    -- algorithm, or might comprise the core of a hashing algorithm (perhaps
+    -- with some final mixing), or might do something completely apart from
+    -- hashing (e.g. simply cons bytes into a list for debugging).
     hash :: (Hash h)=> h -> a -> h
 
 
@@ -308,9 +313,51 @@ infixl <#
 -- | A class for hash functions which take a running hash value and incremental
 -- mix in bytes (or chunks of bytes). Bytes are fed to these methods in our
 -- 'Hashable' instances.
+--
 class Hash h where
+    -- TODO rename mix??
     (<#) :: h -> Word8 -> h
-    -- TODO for 2,4,8-tuples of Word8; with defaults all in terms of each other
+    -- TODO  Possibly more methods, BUT FIRST have tests so we ensure consistency after change
+    -- TODO minimal is any one of these (they cascade down and wrap around)
+    --  :: h -> (Word8,Word8) -> h
+    --  :: h -> (Word8,Word8,Word8,Word8) -> h
+    --  :: h -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8) -> h
+    -- TODO or should these actually be Word16,Word32,Word64?
+    -- TODO
+    --   + how would default methods work?
+    --        h <# h32 = (h <# h16) <# h16 -- 2 fromIntegral casts + one shift
+    --        h <# h16 = (h <# h8) <# h8 -- 2 fromIntegral casts + one shift
+    --     So for no implementation of h32 or h16, this would expand to:
+    --        h <# h32  = ((((h <# h8) <# h8) <# h8) <# h8
+    --     GOOD!
+    --   - look at Hashable instances that would call wider tuples, and see if that's possible/less work
+    --     - summary: 
+    --        - Char: 2/4
+    --        - all Word/Int/Float (obviously)  2/4/8
+    --        - ByteString/ByteArray: (if we can become endian-aware!)  8
+    --        - Text: 2 (on LE) and 8 (on BE, or on LE if we want to do 2 shifts + 2 AND + OR?)
+    --     - think re. how all Word sizes are stored as Word
+    --   - look at murmurhash and see what data it takes.
+    --   - So, cascading & default methods brainstorm:
+    --     - minimal instance is mix1 (left without default)
+    --     - user must ensure that instances here result in identical for all combinations?
+    --       - This is okay e.g. for murmurhash which expects 4 but might get 1:
+    --          - it can be a sum type, function awaiting 3 more bytes.
+    --          - when hashing all finished hash can be extracted by applying it sufficiently to 0
+    --       - BUT!: This can kill efficiency of word-size hashing, e.g. 
+    --          - a constructor requiring 1 more to fill and receiving a string of 4-bytes
+    --          - TODO what is the issue exactly? When/why can't instances
+    --              getting fewer than expected just pad with 0s or something?
+    --          - IDEA: make one of the types platformDependent: mixWord!
+    --          - SO: ... ?
+    --       
+    --  TODO DOCS:
+    --      mention/clarify that Words are delivered in the same order, by Hashable
+    --      instances, regardless of chunk size? ACTUALLY: we might like that
+    --      choice of chunk size is platform-specific! So the user must ensure the
+    --      same hash value regardless of if instance calls mix4 or mix8. IS THIS
+    --      REASONABLE/POSSIBLE FOR e.g. MURMURHASH?
+    -- 
 
 
 -- FNV HASH KERNELS -------------------------------------------------
@@ -747,7 +794,8 @@ instance Hashable P.ByteArray where
 instance Hashable Char where
     {-# INLINE hash #-}
     hash h = go where
-      -- adapted from Data.Text.Internal.Unsafe.Char.unsafeWrite:
+      -- Encoding a unicode code point in UTF-16. adapted from
+      -- Data.Text.Internal.Unsafe.Char.unsafeWrite:
     --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
       go c | n < 0x10000 =
                let (b0,b1) = bytes16 $ fromIntegral n

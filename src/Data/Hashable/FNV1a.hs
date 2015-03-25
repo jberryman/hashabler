@@ -25,7 +25,9 @@ module Data.Hashable.FNV1a (
   , hashFoldl'
   , hashLeftUnfolded
 
-  -- * Defining principled Hashable instances
+  -- * Creating Hash and Hashable instances
+  , mixConstructor
+  -- ** Defining principled Hashable instances
 {- | 
  Special care needs to be taken when defining instances of Hashable for your
  own types, especially for recursive types and types with multiple
@@ -368,6 +370,7 @@ instance Hash FNV32 where
     (FNV32 h32) <# b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
 
 
+-- TODO OR ALSO CALL fnv32 TO UNPACK THIS?
 -- | Hash a value using the standard spec-prescribed 32-bit seed value.  For
 -- relevant instances of primitive types, we expect this to produce values
 -- following the FNV1a spec.
@@ -727,6 +730,9 @@ mixConstructor :: (Hash h)
                -> h -- ^ New hash value
 {-# INLINE mixConstructor #-}
 mixConstructor n = \h-> h <# (0xFF - n)
+
+-- TODO TESTING:
+--       equivalence of identical lazy and strict ByteString/Text (make sure different chunk sizes are used)
 
 -- | Strict @ByteString@
 instance Hashable B.ByteString where

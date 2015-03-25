@@ -38,12 +38,27 @@ library
   default-language:    Haskell2010
   ghc-options: -Wall -fwarn-tabs -O2 -funbox-strict-fields
 
+-- TODO:
+-- testsuite quality
+
+test-suite tests
+  default-language:    Haskell2010
+  hs-source-dirs:      tests
+  type:                exitcode-stdio-1.0
+  main-is:             Main.hs
+  ghc-options:         -Wall -O2 -threaded -funbox-strict-fields -fno-ignore-asserts
+  build-depends:       base
+                     , hashable-fnv1a
+                     , bytestring
+                     , text
+                     , primitive
+
 benchmark bench
   default-language:    Haskell2010
-  type:           exitcode-stdio-1.0
-  main-is:        Main.hs
-  ghc-options:    -Wall -O2 -threaded -funbox-strict-fields
-  hs-source-dirs: benchmarks
+  type:                exitcode-stdio-1.0
+  main-is:             Main.hs
+  ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
+  hs-source-dirs:      benchmarks
   build-depends:       base
                      , array
                      , bytestring

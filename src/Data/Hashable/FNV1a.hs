@@ -209,8 +209,10 @@ fnvOffsetBasis64 = FNV64 14695981039346656037
 
 -- | The FNV-1a hash algorithm. See <http://www.isthe.com/chongo/tech/comp/fnv/>
 newtype FNV32 = FNV32 { fnv32 :: Word32 }
+    deriving (Eq, Ord, Read, Show)
 
 newtype FNV64 = FNV64 { fnv64 :: Word64 }
+    deriving (Eq, Ord, Read, Show)
 
 -- TODO 64-bit hashing
 
@@ -295,7 +297,7 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 --
 -- We try to ensure that bytes are extracted from values in a way that is
 -- portable across architectures (where possible), and straightforward to
--- replicate on other platforms.
+-- replicate on other platforms. Exceptions are *NOTE*-ed in instance docs.
 --
 -- See the section "Defining Hashable instances" for details of what we expect
 -- from instances.
@@ -316,7 +318,7 @@ infixl <#
 -- mix in bytes (or chunks of bytes). Bytes are fed to these methods in our
 -- 'Hashable' instances.
 --
-class Hash h where
+class (Eq h)=> Hash h where
     -- TODO rename mix??
     (<#) :: h -> Word8 -> h
     -- TODO  Possibly more methods, BUT FIRST have tests so we ensure consistency after change
@@ -562,7 +564,7 @@ hash32BigNatByteArrayBytes h numLimbs ba =
 #endif
 
 -- Also GHC 7.10:
-#if MIN_VERSION_base(4,8,0)
+#if MIN_VERSION_base(4,7,0)
 -- | The @Natural@'s value is represented in 32-bit chunks (at least one, for
 -- zero; but no more than necessary), then bytes are added to the hash from
 -- most to least significant (including all initial padding 0s). Finally
@@ -607,10 +609,10 @@ instance (Integral a, Hashable a) => Hashable (Ratio a) where
 -- ---------
 -- Architecture-dependent types, with special handling.
 
--- | @Int@ has architecture-specific size. When hashing on 64-bit machines if
--- the @Int@ value to be hashed falls in the 32-bit Int range, we first cast it
--- to an Int32. This should help ensure that programs that are correct across
--- architectures will also produce the same hash values.
+-- | *NOTE*: @Int@ has platform-dependent size. When hashing on 64-bit machines
+-- if the @Int@ value to be hashed falls in the 32-bit Int range, we first cast
+-- it to an Int32. This should help ensure that programs that are correct
+-- across architectures will also produce the same hash values.
 instance Hashable Int where
     {-# INLINE hash #-}
     hash h i =
@@ -620,10 +622,10 @@ instance Hashable Int where
         _hash32WithSalt_Int_64 h (fromIntegral i)
 #     endif
 
--- | @Word@ has architecture-specific size. When hashing on 64-bit machines if
--- the @Word@ value to be hashed falls in the 32-bit Word range, we first cast
--- it to a Word32. This should help ensure that programs that are correct
--- across architectures will also produce the same hash values.
+-- | *NOTE*: @Word@ has platform-dependent size. When hashing on 64-bit
+-- machines if the @Word@ value to be hashed falls in the 32-bit Word range, we
+-- first cast it to a Word32. This should help ensure that programs that are
+-- correct across architectures will also produce the same hash values.
 instance Hashable Word where
     {-# INLINE hash #-}
     hash h w =
@@ -693,6 +695,9 @@ instance Hashable Int32 where
     {-# INLINE hash #-}
     hash h i = hash h (fromIntegral i :: Word32)
 
+
+-- TODO TESTING on 64-bit test platforms: random Ints > 2^32 hash to same value as when casted to Int64
+--              Or: generate Ints, and depending on range cast to Int32 or Int64 and check hash equality.
 instance Hashable Int64 where
     {-# INLINE hash #-}
     hash h i = hash h (fromIntegral i :: Word64)
@@ -818,6 +823,7 @@ instance Hashable Char where
               hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
 
+-- | *NOTE*: no promise of consistency across runs or platforms.
 instance Hashable ThreadId where
     {-# INLINE hash #-}
     hash h = \(ThreadId tid)-> 
@@ -842,7 +848,8 @@ typeRepInt32 =
 # endif
 
 
--- | No promise of stability across runs or platforms. Implemented via hashStableName
+-- | *NOTE*: No promise of stability across runs or platforms. Implemented via
+-- 'hashStableName'.
 instance Hashable (StableName a) where
     {-# INLINE hash #-}
     hash h = hash h . hashStableName

@@ -69,6 +69,14 @@ module Data.Hashable.FNV1a (
    the case by hashing an initial or final distinct byte for each distinct
    constructor of our type
  .
+ To ensure hashing remains consistent across platforms, instances should not
+ conditionally call different @mix*@-family 'Hash' functions, instead only
+ using 'mixMachineWord' (which 'Hash' instances promise to handle consistently)
+ to make use of platform-specific sizes.  This rule doesn't matter for
+ instances like 'FNV32' which mix in data one byte at a time, but other 'Hash'
+ instances may consume multiple bytes at a time, perhaps using padding bytes,
+ so this becomes important.
+ .
  A final important note: we're not concerned with collisions between values of
  *different types*; in fact in many cases "equivalent" values of different
  types intentionally hash to the same value. This also means instances cannot
@@ -142,6 +150,7 @@ import GHC.Exts (Word(..))
 #endif
 
 -- For WORD_SIZE_IN_BITS constant:
+-- TODO Use Data.Primitive.MachDeps ?
 #include "MachDeps.h"
 -- Do error just once, and assume 32 else 64 below:
 #if WORD_SIZE_IN_BITS == 32
@@ -171,9 +180,7 @@ For test vectors:
 -}
 
 -- TODO TESTING:
---  have a dir of test vectors, separated into files for each type
---  have a utility that both tests AND creates new vectors
---  when generating new, have it first run a check, and complain with a warning message about bumping the major version if they differ.
+--    Careful tests of collisions (looking for incorrect instances)!!
 --
 --  TODO TESTING HASH GOODNESS:
 --    - do scatter plot distribution graph thing from arbitrary quickcheck values.
@@ -223,11 +230,14 @@ newtype FNV64 = FNV64 { fnv64 :: Word64 }
 -- NOTE we're to hash the resulting Word8s from left to right
 
 -- TODO check inlining on these:
+-- TODO MAYBE REMOVE THESE, USING NEW mix* functions
 
+{-
 bytes16 :: Word16 -> (Word8, Word8)
 {-# INLINE bytes16 #-}
 bytes16 wd = (shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
+-}
 
 bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 {-# INLINE bytes32 #-}
@@ -313,14 +323,53 @@ class Hashable a where
     hash :: (Hash h)=> h -> a -> h
 
 
-infixl <#
--- | A class for hash functions which take a running hash value and incremental
--- mix in bytes (or chunks of bytes). Bytes are fed to these methods in our
--- 'Hashable' instances.
+infixl `mix8`
+-- | A class for hash functions which take a running hash value and
+-- incrementally mix in bytes (or chunks of bytes). Bytes are fed to these
+-- methods in our 'Hashable' instances, which promise to call these methods in
+-- a platform-independent way.
 --
+-- Instances of 'Hash' only need to define 'mix8', but may additional handle
+-- @mix@-ing in larger word chunks for performance reasons. For instance a hash
+-- function which operates on four bytes at a time might make use of 'mix32',
+-- and perhaps in 'mix8' pad with three additional 0s.
+-- TODO or just say "see instance for 'Murmur32'."
 class (Eq h)=> Hash h where
-    -- TODO rename mix??
-    (<#) :: h -> Word8 -> h
+    -- | Hash in one byte.
+    mix8 :: h -> Word8 -> h
+    -- | Hash in a 2-byte word. Defaults to 'mix8' on bytes from most to least significant.
+    mix16 :: h -> Word16 -> h
+    -- | Hash in a 4-byte word. Defaults to 'mix16' on bytes from most to least significant.
+    mix32 :: h -> Word32 -> h
+    -- | Hash in an architecture-dependent word. Defaults to 'mix8' on bytes
+    -- from most to least significant. If you override the default
+    -- implementation, you should ensure 'hash' produces the same values on all
+    -- architectures.
+    --
+    -- TODO NOTE ABOUT USING'hash' instead to get 32-bit widths if possible. WHAT IS THE RULE?
+    -- TODO IS THIS EVEN A GOOD/CORRECT IDEA???
+    mixMachineWord :: h -> Word -> h
+
+    {-# INLINE mix16 #-}
+    mix16 h = \wd16-> 
+       let (wd8_0,wd8_1) = (fromIntegral $ unsafeShiftR wd16 8, fromIntegral wd16)
+        in h `mix8` wd8_0 `mix8` wd8_1
+
+    {-# INLINE mix32 #-}
+    mix32 h = \wd32->
+       let (wd16_0,wd16_1) = (fromIntegral $ unsafeShiftR wd32 16, fromIntegral wd32)
+        in h `mix16` wd16_0 `mix16` wd16_1
+
+    {-# INLINE mixMachineWord #-}
+    mixMachineWord h = 
+#     if WORD_SIZE_IN_BITS == 32
+        mix32 h . fromIntegral
+#     else
+        \wd64->
+           let (wd32_0,wd32_1) = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
+            in h `mix32` wd32_0 `mix32` wd32_1
+#     endif
+
     -- TODO  Possibly more methods, BUT FIRST have tests so we ensure consistency after change
     -- TODO minimal is any one of these (they cascade down and wrap around)
     --  :: h -> (Word8,Word8) -> h
@@ -366,10 +415,11 @@ class (Eq h)=> Hash h where
 
 -- FNV HASH KERNELS -------------------------------------------------
 
--- | > (FNV32 h32) <# b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+-- | > (FNV32 h32) `mix8` b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
 instance Hash FNV32 where
-    {-# INLINE (<#) #-}
-    (FNV32 h32) <# b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+    {-# INLINE mix8 #-}
+    (FNV32 h32) `mix8` b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+    -- TODO look at inlining
 
 
 -- TODO OR ALSO CALL fnv32 TO UNPACK THIS?
@@ -416,10 +466,10 @@ instance Hashable Integer where
             sign = _signByte (I# n#)
          in mixConstructor sign $ 
 #           if WORD_SIZE_IN_BITS == 32
-              hash h (magWord :: Word32)
+              h `mix32` magWord
 #           else
               -- only hash enough 32-bit chunks as needed to represent magnitude
-              _hash32SigWords32 h magWord
+              h `mixSignificantMachWord64` magWord
 #           endif
 
 -- GHC 7.10: ------------------------
@@ -443,7 +493,7 @@ instance Hashable Integer where
 #   else
 --    Note, 5 and 3 together mean that we have to special case for sz == 0,
 --    even though I can't get that case to occur in practice:
-      (J# 0# _) -> mixConstructor 0 $ hash h (0 :: Word32)
+      (J# 0# _) -> mixConstructor 0 (h `mix32` 0)
       (J# sz# ba#) -> 
          let numLimbs = abs (I# sz#)
              sign = _signByte (I# sz#)
@@ -467,15 +517,19 @@ _signByte :: Int -> Word8
 _signByte n = fromIntegral ((fromIntegral n :: Word) 
                               `unsafeShiftR` (WORD_SIZE_IN_BITS - 1))
 
+
+#if WORD_SIZE_IN_BITS == 64
 -- Helper for hashing a 64-bit word, possibly omiting the first 32-bit chunk
 -- (if 0). We use this when normalizing big natural representations.
-_hash32SigWords32 :: (Hash h)=> h -> Word64 -> h
-{-# INLINE _hash32SigWords32 #-}
-_hash32SigWords32 h w64 = 
-     let (word32_0, word32_1) = words32 w64
+mixSignificantMachWord64 :: (Hash h)=> h -> Word -> h
+{-# INLINE mixSignificantMachWord64 #-}
+mixSignificantMachWord64 h w64 = 
+     let (word32_0, word32_1) = words32 $ fromIntegral w64
       in if word32_0 == 0 
-          then hash h word32_1
-          else hash h w64
+          then h `mix32` word32_1
+          else h `mixMachineWord` w64
+#endif
+
 
 -- TODO TESTING (LOTS! let quickcheck generate widths, and bit values directly)
 -- Very slow Integer-implementation-agnostic hashing:
@@ -546,17 +600,15 @@ hash32BigNatByteArrayBytes h numLimbs ba =
         -- NOTE: to correctly handle small-endian, we must read in Word-size
         -- chunks (not just Word32 size)
         go !h' (-1) = h'
-        go !h' !ix = let bytsBE = wordBytes $ P.indexByteArray ba ix
-                      in go (hash h' bytsBE) (ix - 1)
+        go !h' !ix = let wd = P.indexByteArray ba ix
+                      in go (h' `mixMachineWord` wd) (ix - 1)
 #  if WORD_SIZE_IN_BITS == 32
-        wordBytes = bytes32
      in go h mostSigLimbIx
 #  else
-        wordBytes = bytes64
         -- handle dropping possibly-empty most-significant Word32, before
         -- processing remaining limbs:
         h0 = let mostSigLimb = P.indexByteArray ba mostSigLimbIx
-              in _hash32SigWords32 h (fromIntegral mostSigLimb)
+              in h `mixSignificantMachWord64` mostSigLimb
         ix0 = mostSigLimbIx - 1
      in go h0 ix0
 #  endif
@@ -578,9 +630,9 @@ instance Hashable Natural where
         -- For Word-size natural
         (NatS# wd#) -> mixConstructor 0 $
 #         if WORD_SIZE_IN_BITS == 32
-            hash h (W# wd#)
+            h `mix32` (fromIntegral $ W# wd#)
 #         else
-            _hash32SigWords32 h (fromIntegral $ W# wd#)
+            h `mixSignificantMachWord64` (W# wd#)
 #         endif
         -- Else using a BigNat (which instance calls required mixConstructor):
         (NatJ# bn)  -> hash h bn
@@ -685,15 +737,15 @@ instance Hashable Double where
 
 instance Hashable Int8 where
     {-# INLINE hash #-}
-    hash h i = hash h (fromIntegral i :: Word8)
+    hash h = mix8 h . fromIntegral
 
 instance Hashable Int16 where
     {-# INLINE hash #-}
-    hash h i = hash h (fromIntegral i :: Word16)
+    hash h = mix16 h . fromIntegral
 
 instance Hashable Int32 where
     {-# INLINE hash #-}
-    hash h i = hash h (fromIntegral i :: Word32)
+    hash h = mix32 h . fromIntegral
 
 
 -- TODO TESTING on 64-bit test platforms: random Ints > 2^32 hash to same value as when casted to Int64
@@ -706,15 +758,15 @@ instance Hashable Int64 where
 
 instance Hashable Word8 where
     {-# INLINE hash #-}
-    hash = (<#)
+    hash = mix8
 
 instance Hashable Word16 where
     {-# INLINE hash #-}
-    hash h = hash h . bytes16
+    hash = mix16
 
 instance Hashable Word32 where
     {-# INLINE hash #-}
-    hash h = hash h . bytes32
+    hash = mix32
 
 instance Hashable Word64 where
     {-# INLINE hash #-}
@@ -734,7 +786,7 @@ mixConstructor :: (Hash h)
                -> h -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
                -> h -- ^ New hash value
 {-# INLINE mixConstructor #-}
-mixConstructor n = \h-> h <# (0xFF - n)
+mixConstructor n = \h-> h `mix8` (0xFF - n)
 
 -- TODO TESTING:
 --       equivalence of identical lazy and strict ByteString/Text (make sure different chunk sizes are used)
@@ -808,14 +860,9 @@ instance Hashable Char where
       -- Encoding a unicode code point in UTF-16. adapted from
       -- Data.Text.Internal.Unsafe.Char.unsafeWrite:
     --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
-      go c | n < 0x10000 =
-               let (b0,b1) = bytes16 $ fromIntegral n
-                in h <# b0 <# b1
-
-           | otherwise =
-               let (b0,b1) = bytes16 lo
-                   (b2,b3) = bytes16 hi
-                in h <# b0 <# b1 <# b2 <# b3
+      go c | n < 0x10000 = h `mix16` fromIntegral n
+              -- TODO MODIFY lo AND CALL mix32, 
+           | otherwise = h `mix16` lo `mix16` hi
 
         where n = ord c
               m = n - 0x10000
@@ -1069,20 +1116,18 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
                     b5 <- peekByteOff base (ix+5)
                     b6 <- peekByteOff base (ix+6)
                     b7 <- peekByteOff base (ix+7)
-                    hash8ByteLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 8)
+                    hash8ByteLoop (hAcc `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 `mix8` b4 `mix8` b5 `mix8` b6 `mix8` b7) (ix + 8)
             
             -- TODO we could unroll this for [0..7]
             hashRemainingBytes !hAcc !ix 
                 | ix > ixFinal  = return hAcc 
                 | otherwise     = assert (ix <= ixFinal) $ do
                     byt <- peekByteOff base ix
-                    hashRemainingBytes (hAcc <# byt) (ix+1)
+                    hashRemainingBytes (hAcc `mix8` byt) (ix+1)
         
          in hash8ByteLoop h off 
 
 
--- TODO WE NEED TO HANDLE ENDIAN-NESS! IF WE FETCH BYTE-16s DOES THAT WORK?
---       see Data.Text.Foreign
 -- TODO TESTING, quickcheck against hashBytesUnrolled64
 --      TESTING, make sure we use characters of variable width. 
 --      TESTING, test: hash t == hash (encodeUtf16BE t)  -- TODO or use big endian?
@@ -1102,18 +1147,20 @@ hashText h = \(T.Text (T.Array ba_) off lenWord16) ->
         hash4Word16sLoop !hAcc !ix 
             | ix == word16sIx = hashRemainingWord16s hAcc word16sIx
             | otherwise     = assert (ix < word16sIx) $
-                let (b0,b1) = bytes16 $ P.indexByteArray ba ix
-                    (b2,b3) = bytes16 $ P.indexByteArray ba (ix+1)
-                    (b4,b5) = bytes16 $ P.indexByteArray ba (ix+2)
-                    (b6,b7) = bytes16 $ P.indexByteArray ba (ix+3)
-                 in hash4Word16sLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 4)
+                -- CAREFUL: Word16s are stored in machine-endian, so we must
+                -- read them out as Word16:
+                let w0 = P.indexByteArray ba ix
+                    w1 = P.indexByteArray ba (ix+1)
+                    w2 = P.indexByteArray ba (ix+2)
+                    w3 = P.indexByteArray ba (ix+3)
+                 in hash4Word16sLoop (hAcc `mix16` w0 `mix16` w1 `mix16` w2 `mix16` w3) (ix + 4)
         
         -- TODO we could unroll this for [0..3]
         hashRemainingWord16s !hAcc !ix 
             | ix > ixFinal  = hAcc 
             | otherwise     = assert (ix <= ixFinal) $
-                let (b0,b1) = bytes16 $ P.indexByteArray ba ix
-                 in hashRemainingWord16s (hAcc <# b0 <# b1) (ix+1)
+                let w0 = P.indexByteArray ba ix
+                 in hashRemainingWord16s (hAcc `mix16` w0) (ix+1)
      in hash4Word16sLoop h off 
 
 
@@ -1136,12 +1183,12 @@ hashByteArray h !off !lenBytes ba =
                     b5 = P.indexByteArray ba (ix+5)
                     b6 = P.indexByteArray ba (ix+6)
                     b7 = P.indexByteArray ba (ix+7)
-                 in hash8ByteLoop (hAcc <# b0 <# b1 <# b2 <# b3 <# b4 <# b5 <# b6 <# b7) (ix + 8)
+                 in hash8ByteLoop (hAcc `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 `mix8` b4 `mix8` b5 `mix8` b6 `mix8` b7) (ix + 8)
         
         -- TODO we could unroll this for [0..7]
         hashRemainingBytes !hAcc !ix 
             | ix > ixFinal  = hAcc 
             | otherwise     = assert (ix <= ixFinal) $
                 let b0 = P.indexByteArray ba ix
-                 in hashRemainingBytes (hAcc <# b0) (ix+1)
+                 in hashRemainingBytes (hAcc `mix8` b0) (ix+1)
      in hash8ByteLoop h off 

@@ -72,7 +72,7 @@ module Data.Hashable.FNV1a (
  To ensure hashing remains consistent across platforms, instances should not
  compile-time-conditionally call different @mix*@-family 'Hash' functions.
  This rule doesn't matter for instances like 'FNV32' which mix in data one byte
- at a time, but other 'Hash' instances may consume multiple bytes at a time,
+ at a time, but other 'Hash' instances may operate on multiple bytes at a time,
  perhaps using padding bytes, so this becomes important.
  .
  A final important note: we're not concerned with collisions between values of
@@ -162,9 +162,7 @@ import GHC.Exts (Word(..))
 
 
 -- TODO BENCHMARKING for 'abs' see: http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs  and  http://stackoverflow.com/q/22445019/176841
--- TODO BENCHMARKING look at fromIntegrals:
---                    - try replacing with unsafeCoerce: smaller to bigger word, 
---                    - AND zero initial bytes and unsafeCoerce for getting lowest byte of Word
+
 
 foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt 
 
@@ -172,9 +170,6 @@ foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt
 {-
 -- see also the non-powers of two mapping methods outlined:
 --  http://www.isthe.com/chongo/tech/comp/fnv/#FNV-1a
-
-For test vectors:
-    http://www.isthe.com/chongo/src/fnv/test_fnv.c
 -}
 
 -- TODO TESTING:
@@ -185,6 +180,8 @@ For test vectors:
 --      - Int, (Int,Int) , [Char], [Either Int Bool]
 --    - also count collisions
 --    - compare with Hashable
+
+
 
 
 
@@ -230,12 +227,10 @@ newtype FNV64 = FNV64 { fnv64 :: Word64 }
 -- TODO check inlining on these:
 -- TODO MAYBE REMOVE THESE, USING NEW mix* functions
 
-{-
 bytes16 :: Word16 -> (Word8, Word8)
 {-# INLINE bytes16 #-}
 bytes16 wd = (shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
--}
 
 bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 {-# INLINE bytes32 #-}
@@ -337,7 +332,7 @@ class (Eq h)=> Hash h where
     mix8 :: h -> Word8 -> h
     -- | Hash in a 2-byte word. Defaults to 'mix8' on bytes from most to least significant.
     mix16 :: h -> Word16 -> h
-    -- | Hash in a 4-byte word. Defaults to 'mix16' on bytes from most to least significant.
+    -- | Hash in a 4-byte word. Defaults to 'mix8' on bytes from most to least significant.
     mix32 :: h -> Word32 -> h
     -- | Hash in an architecture-dependent word. Defaults to 'mix8' on bytes
     -- from most to least significant. If you override the default
@@ -346,13 +341,13 @@ class (Eq h)=> Hash h where
     --
     {-# INLINE mix16 #-}
     mix16 h = \wd16-> 
-       let (wd8_0,wd8_1) = (fromIntegral $ unsafeShiftR wd16 8, fromIntegral wd16)
+       let (wd8_0,wd8_1) = bytes16 wd16
         in h `mix8` wd8_0 `mix8` wd8_1
 
     {-# INLINE mix32 #-}
     mix32 h = \wd32->
-       let (wd16_0,wd16_1) = (fromIntegral $ unsafeShiftR wd32 16, fromIntegral wd32)
-        in h `mix16` wd16_0 `mix16` wd16_1
+       let (b0,b1,b2,b3) = bytes32 wd32
+        in h `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 
 
 
     -- TODO  Possibly more methods, BUT FIRST have tests so we ensure consistency after change
@@ -662,7 +657,6 @@ instance Hashable Int where
         _hash32WithSalt_Int_64 h (fromIntegral i)
 #     endif
 
--- TODO FIX REGRESSION in 69ea95
 -- | *NOTE*: @Word@ has platform-dependent size. When hashing on 64-bit
 -- machines if the @Word@ value to be hashed falls in the 32-bit Word range, we
 -- first cast it to a Word32. This should help ensure that programs that are
@@ -753,7 +747,6 @@ instance Hashable Word16 where
     {-# INLINE hash #-}
     hash = mix16
 
--- TODO FIX REGRESSION in 69ea95
 instance Hashable Word32 where
     {-# INLINE hash #-}
     hash = mix32

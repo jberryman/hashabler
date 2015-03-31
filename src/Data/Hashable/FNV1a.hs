@@ -70,12 +70,10 @@ module Data.Hashable.FNV1a (
    constructor of our type
  .
  To ensure hashing remains consistent across platforms, instances should not
- conditionally call different @mix*@-family 'Hash' functions, instead only
- using 'mixMachineWord' (which 'Hash' instances promise to handle consistently)
- to make use of platform-specific sizes.  This rule doesn't matter for
- instances like 'FNV32' which mix in data one byte at a time, but other 'Hash'
- instances may consume multiple bytes at a time, perhaps using padding bytes,
- so this becomes important.
+ compile-time-conditionally call different @mix*@-family 'Hash' functions.
+ This rule doesn't matter for instances like 'FNV32' which mix in data one byte
+ at a time, but other 'Hash' instances may consume multiple bytes at a time,
+ perhaps using padding bytes, so this becomes important.
  .
  A final important note: we're not concerned with collisions between values of
  *different types*; in fact in many cases "equivalent" values of different
@@ -346,10 +344,6 @@ class (Eq h)=> Hash h where
     -- implementation, you should ensure 'hash' produces the same values on all
     -- architectures.
     --
-    -- TODO NOTE ABOUT USING'hash' instead to get 32-bit widths if possible. WHAT IS THE RULE?
-    -- TODO IS THIS EVEN A GOOD/CORRECT IDEA???
-    mixMachineWord :: h -> Word -> h
-
     {-# INLINE mix16 #-}
     mix16 h = \wd16-> 
        let (wd8_0,wd8_1) = (fromIntegral $ unsafeShiftR wd16 8, fromIntegral wd16)
@@ -360,15 +354,6 @@ class (Eq h)=> Hash h where
        let (wd16_0,wd16_1) = (fromIntegral $ unsafeShiftR wd32 16, fromIntegral wd32)
         in h `mix16` wd16_0 `mix16` wd16_1
 
-    {-# INLINE mixMachineWord #-}
-    mixMachineWord h = 
-#     if WORD_SIZE_IN_BITS == 32
-        mix32 h . fromIntegral
-#     else
-        \wd64->
-           let (wd32_0,wd32_1) = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
-            in h `mix32` wd32_0 `mix32` wd32_1
-#     endif
 
     -- TODO  Possibly more methods, BUT FIRST have tests so we ensure consistency after change
     -- TODO minimal is any one of these (they cascade down and wrap around)
@@ -521,13 +506,13 @@ _signByte n = fromIntegral ((fromIntegral n :: Word)
 #if WORD_SIZE_IN_BITS == 64
 -- Helper for hashing a 64-bit word, possibly omiting the first 32-bit chunk
 -- (if 0). We use this when normalizing big natural representations.
-mixSignificantMachWord64 :: (Hash h)=> h -> Word -> h
+mixSignificantMachWord64 :: (Hash h)=> h -> Word64 -> h
 {-# INLINE mixSignificantMachWord64 #-}
 mixSignificantMachWord64 h w64 = 
-     let (word32_0, word32_1) = words32 $ fromIntegral w64
+     let (word32_0, word32_1) = words32 w64
       in if word32_0 == 0 
           then h `mix32` word32_1
-          else h `mixMachineWord` w64
+          else h `mix32` word32_0 `mix32`  word32_1
 #endif
 
 
@@ -601,10 +586,13 @@ hash32BigNatByteArrayBytes h numLimbs ba =
         -- chunks (not just Word32 size)
         go !h' (-1) = h'
         go !h' !ix = let wd = P.indexByteArray ba ix
-                      in go (h' `mixMachineWord` wd) (ix - 1)
+                      in go (h' `mixWord` wd) (ix - 1)
 #  if WORD_SIZE_IN_BITS == 32
+        mixWord = mix32
      in go h mostSigLimbIx
 #  else
+        mixWord h' wd = let (wd32_0, wd32_1) = words32 wd
+                         in h' `mix32` wd32_0 `mix32` wd32_1
         -- handle dropping possibly-empty most-significant Word32, before
         -- processing remaining limbs:
         h0 = let mostSigLimb = P.indexByteArray ba mostSigLimbIx
@@ -632,7 +620,7 @@ instance Hashable Natural where
 #         if WORD_SIZE_IN_BITS == 32
             h `mix32` (fromIntegral $ W# wd#)
 #         else
-            h `mixSignificantMachWord64` (W# wd#)
+            h `mixSignificantMachWord64` (fromIntegral $ W# wd#)
 #         endif
         -- Else using a BigNat (which instance calls required mixConstructor):
         (NatJ# bn)  -> hash h bn
@@ -674,6 +662,7 @@ instance Hashable Int where
         _hash32WithSalt_Int_64 h (fromIntegral i)
 #     endif
 
+-- TODO FIX REGRESSION in 69ea95
 -- | *NOTE*: @Word@ has platform-dependent size. When hashing on 64-bit
 -- machines if the @Word@ value to be hashed falls in the 32-bit Word range, we
 -- first cast it to a Word32. This should help ensure that programs that are
@@ -764,6 +753,7 @@ instance Hashable Word16 where
     {-# INLINE hash #-}
     hash = mix16
 
+-- TODO FIX REGRESSION in 69ea95
 instance Hashable Word32 where
     {-# INLINE hash #-}
     hash = mix32

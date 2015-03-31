@@ -604,7 +604,7 @@ hash32BigNatByteArrayBytes h numLimbs ba =
 #endif
 
 -- Also GHC 7.10:
-#if MIN_VERSION_base(4,7,0)
+#if MIN_VERSION_base(4,8,0)
 -- | The @Natural@'s value is represented in 32-bit chunks (at least one, for
 -- zero; but no more than necessary), then bytes are added to the hash from
 -- most to least significant (including all initial padding 0s). Finally

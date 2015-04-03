@@ -160,6 +160,37 @@ import GHC.Exts (Word(..))
 #error We only know how to support 32-bit and 64-bit systems, sorry.
 #endif
 
+import Unsafe.Coerce
+
+-- COMMENTED BELOW, WHEN FOUND NOT BENEFICIAL:
+-- These should be fine in all cases:
+coerceInt32Word32 :: Int32 -> Word32
+coerceInt32Word32 = 
+#  if WORD_SIZE_IN_BITS == 32
+    unsafeCoerce
+#  else
+    fromIntegral -- TODO or is unsafeCoerce okay on 64-bit?
+#  endif
+coerceInt64Word64 :: Int64 -> Word64
+coerceInt64Word64 = unsafeCoerce
+-- coerceIntWord :: Int -> Word
+-- coerceIntWord = unsafeCoerce
+
+-- For when argument is known in-bounds:
+-- unsafeCoerceWord8 :: Word -> Word8
+-- unsafeCoerceWord8 = unsafeCoerce
+
+-- For 32-bit:
+#if WORD_SIZE_IN_BITS == 32
+unsafeCoerceIntWord32 :: Int -> Word32
+unsafeCoerceIntWord32 = unsafeCoerce
+-- unsafeCoerceWordWord32 :: Word -> Word32
+-- unsafeCoerceWordWord32 = unsafeCoerce
+#endif
+
+  -- But why is that? The unsafeCoerce version simply has more instructions AFAICT!
+    -- TODO TEST EQUIVALENCE TO fromIntegral
+
 
 -- TODO BENCHMARKING for 'abs' see: http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs  and  http://stackoverflow.com/q/22445019/176841
 
@@ -398,7 +429,7 @@ class (Eq h)=> Hash h where
 -- | > (FNV32 h32) `mix8` b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
 instance Hash FNV32 where
     {-# INLINE mix8 #-}
-    (FNV32 h32) `mix8` b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+    mix8 (FNV32 h32) = \b-> FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
     -- TODO look at inlining
 
 
@@ -450,6 +481,7 @@ instance Hashable Integer where
 #           else
               -- only hash enough 32-bit chunks as needed to represent magnitude
               h `mixSignificantMachWord64` magWord
+              -- TODO benchmark and try unsafeCoerce on 64-bit
 #           endif
 
 -- GHC 7.10: ------------------------
@@ -613,9 +645,9 @@ instance Hashable Natural where
         -- For Word-size natural
         (NatS# wd#) -> mixConstructor 0 $
 #         if WORD_SIZE_IN_BITS == 32
-            h `mix32` (fromIntegral $ W# wd#)
+            h `mix32` (fromIntegral $ W# wd#)  -- TODO benchmark unsafeCoerce
 #         else
-            h `mixSignificantMachWord64` (fromIntegral $ W# wd#)
+            h `mixSignificantMachWord64` (fromIntegral $ W# wd#)  -- TODO benchmark unsafeCoerce on 64-bit
 #         endif
         -- Else using a BigNat (which instance calls required mixConstructor):
         (NatJ# bn)  -> hash h bn
@@ -652,7 +684,7 @@ instance Hashable Int where
     {-# INLINE hash #-}
     hash h i =
 #     if WORD_SIZE_IN_BITS == 32
-        hash h (fromIntegral i :: Int32)
+        mix32 h $ unsafeCoerceIntWord32 i
 #     else
         _hash32WithSalt_Int_64 h (fromIntegral i)
 #     endif
@@ -667,12 +699,13 @@ instance Hashable Word where
 #     if WORD_SIZE_IN_BITS == 32
         hash h (fromIntegral w :: Word32)
 #     else
-        _hash32WithSalt_Word_64 h (fromIntegral w)
+        _hash32WithSalt_Word_64 h (fromIntegral w) -- TODO benchmarking unsafeCoerce on 64-bit
 #     endif
 
 -- we'll test these internals for equality in 32-bit Int range, against
 -- instance for Int32. TODO TESTING
 
+-- TODO Benchmarking + try unsafeCoerce on 64-bit
 -- NOTE: the expressions in the conditionals alone make these quite slow on
 --       32-bit machines, so don't worry about benchmarking this directly.
 _hash32WithSalt_Int_64 :: (Hash h)=> h -> Int64 -> h
@@ -715,8 +748,6 @@ instance Hashable Double where
 --                 hash (0xDE,0xAD) == hash 0xDEAD
 --               then run the same, converting to Int types (with fromIntegral) and testing equality.
 --               We could even have quickcheck provide hex chars, and we concat and read them to get these vals
--- TODO Why are Int operations slower than equivalent Word ops?
---      We should be able to unsafeCoerce Int -> Word, but can't do that directly with smaller sizes.
 
 instance Hashable Int8 where
     {-# INLINE hash #-}
@@ -728,14 +759,14 @@ instance Hashable Int16 where
 
 instance Hashable Int32 where
     {-# INLINE hash #-}
-    hash h = mix32 h . fromIntegral
+    hash h = mix32 h . coerceInt32Word32
 
 
 -- TODO TESTING on 64-bit test platforms: random Ints > 2^32 hash to same value as when casted to Int64
 --              Or: generate Ints, and depending on range cast to Int32 or Int64 and check hash equality.
 instance Hashable Int64 where
     {-# INLINE hash #-}
-    hash h i = hash h (fromIntegral i :: Word64)
+    hash h = \i-> hash h (coerceInt64Word64 i :: Word64)
 
 -- Straightforward hashing of different Words and byte arrays:
 
@@ -842,7 +873,7 @@ instance Hashable Char where
     hash h = go where
       -- Encoding a unicode code point in UTF-16. adapted from
       -- Data.Text.Internal.Unsafe.Char.unsafeWrite:
-    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc.
+    --go c | n .&. complement 0xFFFF == 0 =  -- TODO try this, etc. TODO try look at core & try unsafeCoerce
       go c | n < 0x10000 = h `mix16` fromIntegral n
               -- TODO MODIFY lo AND CALL mix32, 
            | otherwise = h `mix16` lo `mix16` hi

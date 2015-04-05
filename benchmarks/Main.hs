@@ -42,6 +42,7 @@ main = do
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
         t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
     ba50 <- P.newByteArray 50 >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
+    ba1000 <- P.newByteArray 1000 >>= \ba'-> P.fillByteArray ba' 0 1000 1 >> P.unsafeFreezeByteArray ba'
     -- lazy Text and ByteString:
     let bs50LazyTrivial = BL.fromStrict bs50
         bs1000Lazy_by20Chunks = BL.fromChunks $ replicate 20 bs50
@@ -129,6 +130,7 @@ main = do
           , bench "trivial lazy Text x50" $ nf hashFNV32 t50LazyTrivial
           , bench "ByteArray x50" $ nf hashFNV32 ba50
 
+          , bench "ByteArray x1000" $ nf hashFNV32 ba1000
           , bench "strict ByteString x1000" $ nf hashFNV32 bs1000
           , bench "lazy ByteString x1000, in 20 chunks" $ nf hashFNV32 bs1000Lazy_by20Chunks
           , bench "Text x1000" $ nf hashFNV32 t1000

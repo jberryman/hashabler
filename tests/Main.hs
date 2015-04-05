@@ -16,7 +16,7 @@ main = do
     hSetBuffering stdout NoBuffering
     args <- getArgs
     case args of
-         ["regenerate"] -> do
+         ("regenerate":these) -> do
             dirExists <- doesDirectoryExist generatedVectorsDir
             unless (dirExists && (not $ null generatedVectorsDir)) $
                 error "We can't find generated vectors directory where we expect."
@@ -28,7 +28,7 @@ main = do
                 if yn == 'y'
                     then putStrLn "Ok, regenerating. NOTE: YOU MUST BUMP MAJOR VERSION NUMBER!"
                     else error "Exiting without regenerating test vectors."
-            regenerateVectors
+            regenerateVectors (if null these then Nothing else Just these)
          _ -> testsMain
 
 testsMain :: IO ()

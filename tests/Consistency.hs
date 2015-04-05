@@ -202,22 +202,24 @@ forHashFunctions io = sequence [
     ]
 
 
-regenerateVectors :: IO ()
-regenerateVectors = void $ 
+-- Nothing means regenerate all vectors, else just those in the list of names:
+regenerateVectors :: Maybe [String] -> IO ()
+regenerateVectors vs = void $ 
   forHashableInstances $ \nm inputs-> do
     let regenerateOuts :: (Hashable h, Show h)=> [h] -> IO ()
         regenerateOuts ins = void $
           forHashFunctions $ \hashNm hashFunc -> do
             writeFile (outpFilePath nm hashNm) $ show $
               map hashFunc ins
-    case inputs of
-         JustThese ins    -> regenerateOuts ins >> putStr "."
-         StoredRandom gen -> do
-            putStr "o"
-            ins <- gen
-            let inFile = inFilePath nm
-            writeFile inFile $ show ins
-            regenerateOuts ins
+    when (maybe True (nm `elem`) vs) $
+        case inputs of
+             JustThese ins    -> regenerateOuts ins >> putStr "."
+             StoredRandom gen -> do
+                putStr "o"
+                ins <- gen
+                let inFile = inFilePath nm
+                writeFile inFile $ show ins
+                regenerateOuts ins
 
 -- TODO IS INSTANCE FOR LAZY BYTESTRINGS SHITTY AND SLOW W/ SPAC LEAK?
 

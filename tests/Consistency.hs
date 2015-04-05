@@ -228,7 +228,7 @@ regenerateVectors vs = void $
 checkGeneratedVectors :: IO [(String,String,String,String,String)] 
 checkGeneratedVectors = fmap concat $
   forHashableInstances $ \nm inputs-> do
-    putStr "x"
+    putStr "."
     let checkAgainstStored :: (Hashable h, Show h)=> [h] -> IO [(String,String,String,String,String)]
         checkAgainstStored ins = fmap concat $ 
             forHashFunctions $ \hashNm hashFunc -> do

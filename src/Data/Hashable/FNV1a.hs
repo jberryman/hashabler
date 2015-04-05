@@ -198,17 +198,14 @@ unsafeCoerceIntWord32 = unsafeCoerce
 -- Exported from Data.Word in base >= 4.7
 #else
 byteSwap32 :: Word32 -> Word32
-byteSwap32 = _byteSwap32 -- TODO
+byteSwap32 = _byteSwap32
 # if WORD_SIZE_IN_BITS == 64
 byteSwap64 :: Word64 -> Word64
-byteSwap64 = _byteSwap64 -- TODO
+byteSwap64 = _byteSwap64
 # endif
 #endif
 
 -- TODO This is probably so slow it deserves a warning...
--- TODO TESTING:
--- _byteSwap32 0x12345678 == 0x78563412
--- _byteSwap64 0x1234567821436587 == 0x8765432178563412
 _byteSwap32 :: Word32 -> Word32
 _byteSwap32 = \w-> 
     let mask0 = 0xFF000000
@@ -494,8 +491,6 @@ hashFNV32 = hash fnvOffsetBasis32
 -- ------------------------------------------------------------------
 -- NUMERIC TYPES:
 
--- TODO TESTING: make sure we test against many different serialized pos/neg/zero values here:
--- TODO TESTING: these should match Word/Word32/Word64 hash values, followed by a mixConstructor 0
 -- TODO TESTING: for 7.8 and below, see if we can get a small value into J#, and then test that it hashes to the same as the literal small value
 --                (look at code; simple */div or +/- don't seem to do it)
 
@@ -1167,17 +1162,6 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
-                    {-  TODO THIS IS ~ 10% faster than below, but we don't have that issue in ByteArray.
-                    b0 <- peekByteOff base ix
-                    b1 <- peekByteOff base (ix+1)
-                    b2 <- peekByteOff base (ix+2)
-                    b3 <- peekByteOff base (ix+3)
-                    b4 <- peekByteOff base (ix+4)
-                    b5 <- peekByteOff base (ix+5)
-                    b6 <- peekByteOff base (ix+6)
-                    b7 <- peekByteOff base (ix+7)
-                    hash8ByteLoop (hAcc `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 `mix8` b4 `mix8` b5 `mix8` b6 `mix8` b7) (ix + 8)
-                    -}
 #                 if WORD_SIZE_IN_BITS == 32
                     w0Dirty <- peekByteOff base ix
                     w1Dirty <- peekByteOff base (ix+4)

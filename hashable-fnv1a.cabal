@@ -66,6 +66,7 @@ test-suite tests
                      , text
                      , primitive
                      , random
+                     , QuickCheck
   if impl(ghc) && flag(integer-gmp)
       Build-depends:   integer-gmp >= 0.2
 

@@ -131,12 +131,12 @@ forHashableInstances ioUnhandled = sequence [
   , io "Ordering" (justThese [LT,EQ,GT])
   , io "Word8" (justThese [minBound::Word8 .. maxBound] )
   , io "Unit" (justThese [()])
-  , io "B.ByteString" $ storedRandom (map B.pack <$> randLengths 1000 :: IO [B.ByteString])
-  , io "BL.ByteString" $ justThese $ [ BL.fromChunks $ 
+  , io "B.ByteString" $ storedRandom (map B.pack . ([]:) <$> randLengths 999 :: IO [B.ByteString])
+  , io "BL.ByteString" $ justThese $ [ BL.empty, BL.fromChunks $ 
         let wds = iterate (+7) (0::Word8)
          in map (\len-> B.pack (take len wds)) [1,2,3,5,8,13,100,10000] ]
-  , io "T.Text" $ storedRandom $ (map T.pack <$> randLengths 1000 :: IO [T.Text])
-  , io "TL.Text" $ justThese $ [ TL.fromChunks $ 
+  , io "T.Text" $ storedRandom $ (map T.pack . ("":) <$> randLengths 999 :: IO [T.Text])
+  , io "TL.Text" $ justThese $ [ TL.empty, TL.fromChunks $ 
         let cs = iterate succ minBound
          in map (\len-> T.pack (take len cs)) [1,2,3,5,8,13,100,10000] ]
   -- , io "TL.Text" $ storedRandom $ ((forM [1..100] $ \numChunks-> do
@@ -147,12 +147,12 @@ forHashableInstances ioUnhandled = sequence [
   
   -- Or we could write an orphan Read/Show instances, and make more random:
   , io "P.ByteArray" $ justThese $ unsafeDupablePerformIO $
-           forM [1..255] $ \s-> do
+           forM [0..255] $ \s-> do
              aMut <- P.newByteArray s 
              forM_ [0..(s-1)] $ \ix-> P.writeByteArray aMut ix (fromIntegral s :: Word8)
              P.unsafeFreezeByteArray aMut
 #if MIN_VERSION_bytestring(0,10,4)
-  , io "ShortByteString" $ storedRandom $ (map BSh.pack <$> randLengths 1000 :: IO [BSh.ShortByteString])
+  , io "ShortByteString" $ storedRandom $ (map BSh.pack . ([]:) <$> randLengths 999 :: IO [BSh.ShortByteString])
 #endif
 #if MIN_VERSION_base(4,8,0)
 # ifdef VERSION_integer_gmp

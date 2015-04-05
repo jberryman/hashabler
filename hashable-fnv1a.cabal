@@ -32,7 +32,7 @@ Flag integer-gmp
 
 library
   exposed-modules:     Data.Hashable.FNV1a
-  -- other-modules:       
+  other-modules:       MachDeps
   -- other-extensions:    
   build-depends:       base >=4.3 && <5
                      , array
@@ -40,6 +40,8 @@ library
                      , text
                      , primitive
                      , ghc-prim
+                     -- For endianness test:
+                     , template-haskell
 
   if impl(ghc) && flag(integer-gmp)
       Build-depends:   integer-gmp >= 0.2

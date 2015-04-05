@@ -150,6 +150,8 @@ import GHC.Exts (Word(..))
 -- For WORD_SIZE_IN_BITS constant:
 -- TODO Use Data.Primitive.MachDeps ?
 #include "MachDeps.h"
+import MachDeps
+
 -- Do error just once, and assume 32 else 64 below:
 #if WORD_SIZE_IN_BITS == 32
 -- for fast div by power of two:
@@ -191,6 +193,51 @@ unsafeCoerceIntWord32 = unsafeCoerce
   -- But why is that? The unsafeCoerce version simply has more instructions AFAICT!
     -- TODO TEST EQUIVALENCE TO fromIntegral
 
+
+#if MIN_VERSION_base(4,7,0)
+-- Exported from Data.Word in base >= 4.7
+#else
+byteSwap32 :: Word32 -> Word32
+byteSwap32 = _byteSwap32 -- TODO
+# if WORD_SIZE_IN_BITS == 64
+byteSwap64 :: Word64 -> Word64
+byteSwap64 = _byteSwap64 -- TODO
+# endif
+#endif
+
+-- TODO This is probably so slow it deserves a warning...
+-- TODO TESTING:
+-- _byteSwap32 0x12345678 == 0x78563412
+-- _byteSwap64 0x1234567821436587 == 0x8765432178563412
+_byteSwap32 :: Word32 -> Word32
+_byteSwap32 = \w-> 
+    let mask0 = 0xFF000000
+        mask1 = 0x00FF0000
+        mask2 = 0x0000FF00
+        mask3 = 0x000000FF
+     in (unsafeShiftR (w .&. mask0) 24) .|.
+        (unsafeShiftR (w .&. mask1) 8)  .|.
+        (unsafeShiftL (w .&. mask2) 8)  .|.
+        (unsafeShiftL (w .&. mask3) 24)
+
+_byteSwap64 :: Word64 -> Word64
+_byteSwap64 = \w-> 
+    let mask0 = 0xFF00000000000000
+        mask1 = 0x00FF000000000000
+        mask2 = 0x0000FF0000000000
+        mask3 = 0x000000FF00000000
+        mask4 = 0x00000000FF000000
+        mask5 = 0x0000000000FF0000
+        mask6 = 0x000000000000FF00
+        mask7 = 0x00000000000000FF
+     in (unsafeShiftR (w .&. mask0) 56) .|.
+        (unsafeShiftR (w .&. mask1) 40) .|.
+        (unsafeShiftR (w .&. mask2) 24) .|.
+        (unsafeShiftR (w .&. mask3) 8)  .|.
+        (unsafeShiftL (w .&. mask4) 8)  .|.
+        (unsafeShiftL (w .&. mask5) 24) .|.
+        (unsafeShiftL (w .&. mask6) 40) .|.
+        (unsafeShiftL (w .&. mask7) 56)
 
 -- TODO BENCHMARKING for 'abs' see: http://graphics.stanford.edu/~seander/bithacks.html#IntegerAbs  and  http://stackoverflow.com/q/22445019/176841
 
@@ -347,7 +394,6 @@ class Hashable a where
     hash :: (Hash h)=> h -> a -> h
 
 
-infixl `mix8`
 -- | A class for hash functions which take a running hash value and
 -- incrementally mix in bytes (or chunks of bytes). Bytes are fed to these
 -- methods in our 'Hashable' instances, which promise to call these methods in
@@ -830,7 +876,7 @@ instance Hashable BSh.ShortByteString where
 #   endif
         let ba = P.ByteArray ba_
          in mixConstructor 0 $
-              hashByteArray h 0 (P.sizeofByteArray ba) ba
+              hashByteArray h (P.sizeofByteArray ba) ba
 #endif
 
 -- | Strict @Text@, hashed as big endian UTF-16.
@@ -854,7 +900,7 @@ instance Hashable TL.Text where
 instance Hashable P.ByteArray where
     {-# INLINE hash #-}
     hash h = \ba-> mixConstructor 0 $
-        hashByteArray h 0 (P.sizeofByteArray ba) ba
+        hashByteArray h (P.sizeofByteArray ba) ba
 
 -- ------------------------------------------------------------------
 -- MISC THINGS:
@@ -1106,8 +1152,7 @@ hashLeftUnfolded = go
 -- TODO TESTING make sure to test on bytestrings where off /= 0
 
 
--- TODO MAYBE Factor out common code here and hashByteArray
-
+-- TODO TESTING: arrays against [Word8]
 
 -- This is about twice as fast as a loop with single byte peeks:
 hashBytesUnrolled64 :: (Hash h)=> h -> B.ByteString -> h
@@ -1122,6 +1167,7 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
+                    {-  TODO THIS IS ~ 10% faster than below, but we don't have that issue in ByteArray.
                     b0 <- peekByteOff base ix
                     b1 <- peekByteOff base (ix+1)
                     b2 <- peekByteOff base (ix+2)
@@ -1131,6 +1177,21 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
                     b6 <- peekByteOff base (ix+6)
                     b7 <- peekByteOff base (ix+7)
                     hash8ByteLoop (hAcc `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 `mix8` b4 `mix8` b5 `mix8` b6 `mix8` b7) (ix + 8)
+                    -}
+#                 if WORD_SIZE_IN_BITS == 32
+                    w0Dirty <- peekByteOff base ix
+                    w1Dirty <- peekByteOff base (ix+4)
+                    let (w0,w1) = if littleEndian
+                                   then (byteSwap32 w0Dirty, byteSwap32 w1Dirty)
+                                   else (w0Dirty,w1Dirty)
+#                 else
+                    w64Dirty <- peekByteOff base ix
+                    let w64 = if littleEndian
+                                then byteSwap64 w64Dirty
+                                else w64Dirty
+                        (w0,w1) = words32 w64
+#                 endif
+                    hash8ByteLoop (hAcc `mix32` w0 `mix32` w1) (ix + 8)
             
             -- TODO we could unroll this for [0..7]
             hashRemainingBytes !hAcc !ix 
@@ -1177,27 +1238,34 @@ hashText h = \(T.Text (T.Array ba_) off lenWord16) ->
                  in hashRemainingWord16s (hAcc `mix16` w0) (ix+1)
      in hash4Word16sLoop h off 
 
-
-hashByteArray :: (Hash h)=> h -> Int -> Int -> P.ByteArray -> h
+hashByteArray :: (Hash h)=> h -> Int -> P.ByteArray -> h
 {-# INLINE hashByteArray #-}
-hashByteArray h !off !lenBytes ba = 
+hashByteArray h !lenBytes ba = 
     let !bytesRem = lenBytes .&. 7         -- lenBytes `mod` 8
         -- index where we begin to read (bytesRem < 8) individual bytes:
-        !bytesIx = off+lenBytes-bytesRem
-        !ixFinal = off+lenBytes-1
+        !bytesIx = lenBytes-bytesRem
+        !ixFinal = lenBytes-1
+        -- bytesIx in elements of Word32:
+        !w32BytesIx = bytesIx `unsafeShiftR` 2
 
+        -- Index `ix` in terms of elements of Word32:
         hash8ByteLoop !hAcc !ix 
-            | ix == bytesIx = hashRemainingBytes hAcc bytesIx
-            | otherwise     = assert (ix < bytesIx) $
-                let b0 = P.indexByteArray ba ix
-                    b1 = P.indexByteArray ba (ix+1)
-                    b2 = P.indexByteArray ba (ix+2)
-                    b3 = P.indexByteArray ba (ix+3)
-                    b4 = P.indexByteArray ba (ix+4)
-                    b5 = P.indexByteArray ba (ix+5)
-                    b6 = P.indexByteArray ba (ix+6)
-                    b7 = P.indexByteArray ba (ix+7)
-                 in hash8ByteLoop (hAcc `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 `mix8` b4 `mix8` b5 `mix8` b6 `mix8` b7) (ix + 8)
+            | ix == w32BytesIx = hashRemainingBytes hAcc bytesIx
+            | otherwise     = assert (ix < w32BytesIx) $
+#                 if WORD_SIZE_IN_BITS == 32
+                    let w0Dirty = P.indexByteArray ba ix
+                        w1Dirty = P.indexByteArray ba (ix+1)
+                        (w0,w1) = if littleEndian
+                                   then (byteSwap32 w0Dirty, byteSwap32 w1Dirty)
+                                   else (w0Dirty,w1Dirty)
+#                 else
+                    let w64Dirty = P.indexByteArray ba ix
+                        w64 = if littleEndian
+                                then byteSwap64 w64Dirty
+                                else w64Dirty
+                        (w0,w1) = words32 w64
+#                 endif
+                     in hash8ByteLoop (hAcc `mix32` w0 `mix32` w1) (ix + 2)
         
         -- TODO we could unroll this for [0..7]
         hashRemainingBytes !hAcc !ix 
@@ -1205,4 +1273,4 @@ hashByteArray h !off !lenBytes ba =
             | otherwise     = assert (ix <= ixFinal) $
                 let b0 = P.indexByteArray ba ix
                  in hashRemainingBytes (hAcc `mix8` b0) (ix+1)
-     in hash8ByteLoop h off 
+     in hash8ByteLoop h 0 

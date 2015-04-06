@@ -132,7 +132,7 @@ import System.Mem.StableName
 import Data.Ratio (Ratio, denominator, numerator)
 
 -- For Integer:
-#ifdef VERSION_integer_gmp
+#ifdef MIN_VERSION_integer_gmp
 import GHC.Exts (Int(..))
 import GHC.Integer.GMP.Internals (Integer(..))
 # if MIN_VERSION_integer_gmp(1,0,0)
@@ -511,7 +511,7 @@ hashFNV32 = hash fnvOffsetBasis32
 instance Hashable Integer where
     {-# INLINE hash #-}
 -- integer-gmp implementation: --------------------------------------
-#if defined(VERSION_integer_gmp)
+#ifdef MIN_VERSION_integer_gmp
     hash h = \i-> case i of
       (S# n#) ->
         let magWord = fromIntegral $ abs (I# n#)
@@ -607,7 +607,7 @@ _integerWords nSigned = (sign , go (abs nSigned) []) where
         (x `shiftR` 32, fromIntegral x)
 
 
-#ifdef VERSION_integer_gmp
+#ifdef MIN_VERSION_integer_gmp
 -- GHC 7.10:
 # if MIN_VERSION_integer_gmp(1,0,0)
 -- Internal. Hashable instances will require a 'mixConstructor'. We use the same
@@ -682,7 +682,7 @@ hash32BigNatByteArrayBytes h numLimbs ba =
 instance Hashable Natural where
     {-# INLINE hash #-}
     hash h nat = case nat of
-# if MIN_VERSION_integer_gmp(1,0,0)
+# if defined (MIN_VERSION_integer_gmp) && MIN_VERSION_integer_gmp(1,0,0)
         -- For Word-size natural
         (NatS# wd#) -> mixConstructor 0 $
 #         if WORD_SIZE_IN_BITS == 32
@@ -693,6 +693,7 @@ instance Hashable Natural where
         -- Else using a BigNat (which instance calls required mixConstructor):
         (NatJ# bn)  -> hash h bn
 # else
+        ....
         -- Natural represented with non-negative Integer:
         (Natural n) -> hash h n
 # endif

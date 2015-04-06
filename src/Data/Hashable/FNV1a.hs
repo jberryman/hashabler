@@ -123,7 +123,9 @@ import GHC.Prim(ThreadId#)
 
 -- For TypeRep
 import Data.Typeable
-#if __GLASGOW_HASKELL__ >= 702
+#if  __GLASGOW_HASKELL__ >= 710
+import GHC.Fingerprint.Type(Fingerprint(..))
+#elif __GLASGOW_HASKELL__ >= 702
 import Data.Typeable.Internal(TypeRep(..))
 import GHC.Fingerprint.Type(Fingerprint(..))
 #endif
@@ -932,16 +934,18 @@ instance Hashable ThreadId where
     hash h = \(ThreadId tid)-> 
         hash h (fromIntegral $ getThreadId tid :: Word)
 
+-- | *NOTE*: no promise of consistency across platforms or GHC versions.
 instance Hashable TypeRep where
     {-# INLINE hash #-}
     hash h = hash h . typeRepInt32
 
--- TODO TEST IF THESE SEEM TO BE CONSISTENT ACROSS RUNS AND MACHINES (AND DIFFERENT VERSIONS OF BASE >= 7.2)
---      AND CONSIDER REMOVING SOME CONDITIONS.
 typeRepInt32 :: TypeRep -> Int32
 {-# INLINE typeRepInt32 #-}
 typeRepInt32 = 
-# if __GLASGOW_HASKELL__ >= 702
+# if __GLASGOW_HASKELL__ >= 710
+    -- Fingerprint is just the MD5, so taking any Int from it is fine
+    (\(Fingerprint i64 _) -> fromIntegral i64) . typeRepFingerprint
+# elif __GLASGOW_HASKELL__ >= 702
     -- Fingerprint is just the MD5, so taking any Int from it is fine
     \(TypeRep (Fingerprint i64 _) _ _) -> fromIntegral i64
 # else

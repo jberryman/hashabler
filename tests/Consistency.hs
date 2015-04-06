@@ -175,6 +175,10 @@ forHashableInstances ioUnhandled = sequence [
 
   -- For now, just on >= 7.2:
 #if __GLASGOW_HASKELL__ >= 702
+  {- These aren't consistent across GHC versions, and we have no promise that
+     that will be the case going forward. Comment for now. Stored vectors match
+     GHC 7.10, and are kept in the repo for now.
+
   , io "TypeRep" (justThese [ typeOf True
                          , typeOf (1::Int)
                          , typeOf (Just LT)
@@ -183,6 +187,7 @@ forHashableInstances ioUnhandled = sequence [
                          , typeOf (print ())
                          -- TODO sufficient?
                          ])
+  -}
 #endif
   , io "Maybe_Word8" (justThese (Nothing : map Just [minBound::Word8 .. maxBound])  )
   , io "Either_Word8_Bool" (justThese (Right True : Right False : map Left [minBound::Word8 .. maxBound]) )

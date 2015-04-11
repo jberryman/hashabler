@@ -2,6 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 -- TODO change package and namespaces from fnv1a to just fnv
+--      OR: hashabler, hashknicely, hashabrer
 name:                hashable-fnv1a
 version:             0.1.0.0
 -- synopsis:            
@@ -31,7 +32,14 @@ Flag integer-gmp
   Description: Are we using integer-gmp to provide fast Integer instances?
   Default: True
 
+Flag test
+  Description: Build the tests and benchmark suites?
+  Default: False
+
 library
+  if flag(test)
+      CPP-Options:     -DEXPORT_INTERNALS
+
   exposed-modules:     Data.Hashable.FNV1a
   other-modules:       MachDeps
   -- other-extensions:    
@@ -59,36 +67,78 @@ library
 -- TODO:
 -- test-suite quality
 
-test-suite tests
+-- I'm not sure how to make this test-suite and still be able to get
+-- conditional export list in library:
+Executable tests
   default-language:    Haskell2010
   hs-source-dirs:      tests
-  type:                exitcode-stdio-1.0
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields -fno-ignore-asserts
-  build-depends:       base
-                     , hashable-fnv1a
-                     , directory
-                     , bytestring
-                     , text
-                     , primitive
-                     , random
-                     , QuickCheck
-  if flag(integer-gmp)
-      Build-depends:   integer-gmp >= 0.2
+  if flag(test)
+      buildable: True
+      build-depends:       base
+                         , hashable-fnv1a
+                         , directory
+                         , bytestring
+                         , text
+                         , primitive
+                         , random
+                         , QuickCheck
+      if flag(integer-gmp)
+          Build-depends:   integer-gmp >= 0.2
+  else 
+      buildable: False
 
 
-benchmark bench
+Executable bench
   default-language:    Haskell2010
-  type:                exitcode-stdio-1.0
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
   hs-source-dirs:      benchmarks
-  build-depends:       base
+  if flag(test)
+      buildable: True
+      build-depends:   base
                      , array
                      , bytestring
                      , text
                      , primitive
-                     
+
                      , hashable-fnv1a
                      , criterion
                      , deepseq
+  else 
+      buildable: False
+
+-- TODO OR RENAME
+source-repository head
+  type:     git
+  location: https://github.com/jberryman/hashabler.git
+
+
+
+Executable core
+ -- find dist/build/core/core-tmp -name '*dump-simpl'
+  if flag(test)
+      buildable: True
+      build-depends:       
+           base
+         , hashable-fnv1a
+  else 
+      buildable: False
+
+ ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
+ ghc-options: -O2  -rtsopts  
+ 
+ -- Either do threaded for eventlogging and simple timing...
+ --ghc-options: -threaded -eventlog
+ -- and run e.g. with +RTS -N -l
+
+ -- ...or do non-threaded runtime
+ --ghc-prof-options: -fprof-auto
+ --Relevant profiling RTS settings:  -xt
+ -- TODO also check out +RTS -A10m, and look at output of -sstderr
+
+ -- hs-source-dirs: core-example
+ main-is: core.hs
+ default-language:    Haskell2010
+

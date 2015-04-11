@@ -21,10 +21,6 @@ module Data.Hashable.FNV1a (
   , fnvOffsetBasis32
   , fnvOffsetBasis64
 
-  -- INTERNALS FOR TESTING. TODO REMOVE
-  , hashFoldl'
-  , hashLeftUnfolded
-
   -- * Creating Hash and Hashable instances
   , mixConstructor
   -- ** Defining principled Hashable instances
@@ -82,6 +78,17 @@ module Data.Hashable.FNV1a (
  interpretation of the mistake in our faulty @Maybe@ instance above
  -}
  -- *** TODO notes on Generic deriving
+  
+  
+  
+#ifdef EXPORT_INTERNALS
+  -- * Internal functions exposed for testing; you shouldn't see these
+  , hashFoldl'
+  , hashLeftUnfolded
+  , bytesFloat, bytesDouble
+  , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
+  , _bytes64_32 , _bytes64_64, _signByte
+#endif
     ) where
 
 
@@ -249,9 +256,6 @@ foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt
 --  http://www.isthe.com/chongo/tech/comp/fnv/#FNV-1a
 -}
 
--- TODO TESTING:
---    Careful tests of collisions (looking for incorrect instances)!!
---
 --  TODO TESTING HASH GOODNESS:
 --    - do scatter plot distribution graph thing from arbitrary quickcheck values.
 --      - Int, (Int,Int) , [Char], [Either Int Bool]
@@ -314,19 +318,26 @@ bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 bytes32 wd = (shifted 24, shifted 16, shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
 
--- TODO benchmark on different arch's and make conditional (but expose both for
---      testing equivalence w/ quickcheck)
 -- faster for 64-bit archs?
 bytes64 :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
 {-# INLINE bytes64 #-}
-bytes64 wd = ( shifted 56, shifted 48, shifted 40, shifted 32
-             , shifted 24, shifted 16, shifted 8, fromIntegral wd)
+bytes64 = \wd64->
+#  if WORD_SIZE_IN_BITS == 32
+    _bytes64_32 wd64
+#  else
+    _bytes64_64 wd64
+#  endif
+
+_bytes64_64 :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
+{-# INLINE _bytes64_64 #-}
+_bytes64_64 wd = ( shifted 56, shifted 48, shifted 40, shifted 32
+                 , shifted 24, shifted 16, shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
 
--- faster for 32-bit archs?
-bytes64_alt :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
-{-# INLINE bytes64_alt #-}
-bytes64_alt wd = 
+-- faster for 32-bit archs
+_bytes64_32 :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
+{-# INLINE _bytes64_32 #-}
+_bytes64_32 wd = 
     let (wd0, wd1) = words32 wd
         (b0,b1,b2,b3) = bytes32 wd0
         (b4,b5,b6,b7) = bytes32 wd1
@@ -347,8 +358,7 @@ bytesFloat = bytes32 . floatToWord
 
 bytesDouble :: Double -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
 {-# INLINE bytesDouble #-}
-bytesDouble = bytes64_alt . doubleToWord
---bytesDouble = bytes64 . doubleToWord -- TODO conditional upon arch
+bytesDouble = bytes64 . doubleToWord
 
 
 -- See: http://stackoverflow.com/a/7002812/176841 . 
@@ -498,7 +508,7 @@ hashFNV32 = hash fnvOffsetBasis32
 
 -- NOTE: non-obviously, but per our rule about variable-width values, this must
 -- also be wrapped in a `mixConstructor`; consider the hashes of (0xDEAD,
--- 0xBEEF) and (0xDE, 0xADBEEF). The way we mix in the sign handles this.  -- TODO TESTING (this)
+-- 0xBEEF) and (0xDE, 0xADBEEF). The way we mix in the sign handles this.
 -- 
 -- I would rather truncate to 8-bit "limbs" but using 32-bit limbs seems like a
 -- good tradeoff: on 64-bit platforms we just do a conditional instead of on
@@ -559,11 +569,10 @@ instance Hashable Integer where
 -- other Integer implementations: -----------------------------------
 #else
     -- For non-gmp Integer; quite slow.
-    hash = _hash32WithSaltInteger
+    hash = _hash32Integer
 #endif
 
 
--- TODO TESTING quickcheck against conditional
 -- TODO benchmark against conditional
 -- Helper to quickly (hopefully) extract sign bit (1 for negative, 0 otherwise)
 -- from Int. Assumes two's complement.
@@ -586,10 +595,9 @@ mixSignificantMachWord64 h w64 =
 #endif
 
 
--- TODO TESTING (LOTS! let quickcheck generate widths, and bit values directly)
 -- Very slow Integer-implementation-agnostic hashing:
-_hash32WithSaltInteger :: (Hash h)=> h -> Integer -> h
-_hash32WithSaltInteger h i = 
+_hash32Integer :: (Hash h)=> h -> Integer -> h
+_hash32Integer h i = 
     let (sgn, limbs) = _integerWords i
      in mixConstructor sgn $ 
          foldl' hash h limbs
@@ -695,7 +703,6 @@ instance Hashable Natural where
         -- Else using a BigNat (which instance calls required mixConstructor):
         (NatJ# bn)  -> hash h bn
 # else
-        ....
         -- Natural represented with non-negative Integer:
         (Natural n) -> hash h n
 # endif
@@ -730,7 +737,7 @@ instance Hashable Int where
 #     if WORD_SIZE_IN_BITS == 32
         mix32 h $ unsafeCoerceIntWord32 i
 #     else
-        _hash32WithSalt_Int_64 h (fromIntegral i)
+        _hash32_Int_64 h (fromIntegral i)
 #     endif
 
 -- | *NOTE*: @Word@ has platform-dependent size. When hashing on 64-bit
@@ -743,26 +750,24 @@ instance Hashable Word where
 #     if WORD_SIZE_IN_BITS == 32
         hash h (fromIntegral w :: Word32)
 #     else
-        _hash32WithSalt_Word_64 h (fromIntegral w) -- TODO benchmarking unsafeCoerce on 64-bit
+        _hash32_Word_64 h (fromIntegral w) -- TODO benchmarking unsafeCoerce on 64-bit
 #     endif
 
--- we'll test these internals for equality in 32-bit Int range, against
--- instance for Int32. TODO TESTING
 
 -- TODO Benchmarking + try unsafeCoerce on 64-bit
 -- NOTE: the expressions in the conditionals alone make these quite slow on
 --       32-bit machines, so don't worry about benchmarking this directly.
-_hash32WithSalt_Int_64 :: (Hash h)=> h -> Int64 -> h
-{-# INLINE _hash32WithSalt_Int_64 #-}
-_hash32WithSalt_Int_64 h = \i->
+_hash32_Int_64 :: (Hash h)=> h -> Int64 -> h
+{-# INLINE _hash32_Int_64 #-}
+_hash32_Int_64 h = \i->
     -- Can we losslessly cast to 32-bit representation?
     if abs i <= (fromIntegral (maxBound :: Int32))
         then hash h (fromIntegral i :: Int32)
         else hash h i
 
-_hash32WithSalt_Word_64 :: (Hash h)=> h -> Word64 -> h
-{-# INLINE _hash32WithSalt_Word_64 #-}
-_hash32WithSalt_Word_64 h = \w->
+_hash32_Word_64 :: (Hash h)=> h -> Word64 -> h
+{-# INLINE _hash32_Word_64 #-}
+_hash32_Word_64 h = \w->
     -- Can we losslessly cast to 32-bit representation?
     if w <= (fromIntegral (maxBound :: Word32))
         then hash h (fromIntegral w :: Word32)
@@ -788,11 +793,6 @@ instance Hashable Double where
 -- GHC uses two's complement representation for signed ints; C has this
 -- undefined, I guess; just cast to Word and hash.
 
--- TODO TESTING: spot test a few literal Words of all sizes for sanity:
---                 hash (0xDE,0xAD) == hash 0xDEAD
---               then run the same, converting to Int types (with fromIntegral) and testing equality.
---               We could even have quickcheck provide hex chars, and we concat and read them to get these vals
-
 instance Hashable Int8 where
     {-# INLINE hash #-}
     hash h = mix8 h . fromIntegral
@@ -806,8 +806,6 @@ instance Hashable Int32 where
     hash h = mix32 h . coerceInt32Word32
 
 
--- TODO TESTING on 64-bit test platforms: random Ints > 2^32 hash to same value as when casted to Int64
---              Or: generate Ints, and depending on range cast to Int32 or Int64 and check hash equality.
 instance Hashable Int64 where
     {-# INLINE hash #-}
     hash h = \i-> hash h (coerceInt64Word64 i :: Word64)
@@ -828,7 +826,7 @@ instance Hashable Word32 where
 
 instance Hashable Word64 where
     {-# INLINE hash #-}
-    hash h = hash h . bytes64_alt    -- TODO CONDITIONAL on arch
+    hash h = hash h . bytes64
 
 
 -- ------------------------------------------------------------------
@@ -845,9 +843,6 @@ mixConstructor :: (Hash h)
                -> h -- ^ New hash value
 {-# INLINE mixConstructor #-}
 mixConstructor n = \h-> h `mix8` (0xFF - n)
-
--- TODO TESTING:
---       equivalence of identical lazy and strict ByteString/Text (make sure different chunk sizes are used)
 
 -- | Strict @ByteString@
 instance Hashable B.ByteString where
@@ -904,9 +899,6 @@ instance Hashable P.ByteArray where
 -- MISC THINGS:
 
 
--- TODO TESTING matches singleton Text instance (make sure to test double-wide)
---              also String.
---      TESTING that chars in range U+D800 to U+DFFF hash to different values
 
 -- TODO look at core
 -- | Hash a @Char@ as big endian UTF-16. Note that Char permits values in the
@@ -970,14 +962,10 @@ instance Hashable (StableName a) where
 -- ---------
 -- Sum types
 
--- TODO REVISIT
--- | 'True' hashes to @'hashFNV32' (1::Word8)@, 'False' hashes to @'hashFNV32'
--- (0::Word8)@ TODO or use fromBool/toBool from Foreign.Marshal.Utils (why?)
+-- | > hash h = hash h . \b-> if b then (1::Word8) else 0
 instance Hashable Bool where
     {-# INLINE hash #-}
-    hash h b
-       | b         = hash h (1::Word8) 
-       | otherwise = hash h (0::Word8) -- TODO we could omit the xor here.
+    hash h = hash h . \b-> if b then (1::Word8) else 0
 
 
 instance Hashable Ordering where
@@ -1007,6 +995,7 @@ instance (Hashable a, Hashable b) => Hashable (Either a b) where
 -- Per our rules, this must perturb the hash value by at least a byte, even
 -- though its value is entirely "fixed" by its type. Consider [()]; the
 -- instance relies on () following the rule.
+--
 -- | > hash = const . mixConstructor 0
 instance Hashable () where
     {-# INLINE hash #-}
@@ -1059,11 +1048,6 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 --
 -- TESTING NOTES:
 --   - test that Generic instances derived from identically-shaped types match in every way behavior of instances defined here
---   - variable-width & sum types:
---     - test in an automated way [[1,2],[3]] vs [[1]],[2,3]] issue
---     - somehow test problem of marker bits added to *end* i.e. 
---   - quickcheck equivalence of "array-like" instances, as far as possible.
---   - cross-architecture compatibility (against serialized random output from quickcheck)
 --   - avalanche etc. properties for both primitive and compount instances
 --
 -- TODO IMPLEMENTATION:
@@ -1148,11 +1132,6 @@ hashLeftUnfolded = go
           go !h (a1:as) = go (h `hash` a1) as
 
 
--- benchmark fetching bytes from bytestring in different ways -----------
--- TODO TESTING make sure to test on bytestrings where off /= 0
-
-
--- TODO TESTING: arrays against [Word8]
 
 -- This is about twice as fast as a loop with single byte peeks:
 hashBytesUnrolled64 :: (Hash h)=> h -> B.ByteString -> h
@@ -1191,10 +1170,6 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
         
          in hash8ByteLoop h off 
 
-
--- TODO TESTING, quickcheck against hashBytesUnrolled64
---      TESTING, make sure we use characters of variable width. 
---      TESTING, test: hash t == hash (encodeUtf16BE t)  -- TODO or use big endian?
 
 -- NOTE: we can't simply call hashByteArray here; Text is stored as
 -- machine-endian UTF-16 (as promised by public Data.Text.Foreign), so we need

@@ -32,12 +32,12 @@ Flag integer-gmp
   Description: Are we using integer-gmp to provide fast Integer instances?
   Default: True
 
-Flag test
+Flag dev
   Description: Build the tests and benchmark suites?
   Default: False
 
 library
-  if flag(test)
+  if flag(dev)
       CPP-Options:     -DEXPORT_INTERNALS
 
   exposed-modules:     Data.Hashable.FNV1a
@@ -74,7 +74,7 @@ Executable tests
   hs-source-dirs:      tests
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields -fno-ignore-asserts
-  if flag(test)
+  if flag(dev)
       buildable: True
       build-depends:       base
                          , hashable-fnv1a
@@ -95,7 +95,7 @@ Executable bench
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
   hs-source-dirs:      benchmarks
-  if flag(test)
+  if flag(dev)
       buildable: True
       build-depends:   base
                      , array
@@ -109,6 +109,30 @@ Executable bench
   else 
       buildable: False
 
+
+-- Some code to visualize distributions of hashes.
+Executable viz
+  default-language:    Haskell2010
+  main-is:             Main.hs
+  ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
+  hs-source-dirs:      viz
+  if flag(dev)
+      buildable: True
+      build-depends:   base
+                     , array
+                     , bytestring
+                     , text
+                     , primitive
+                     , JuicyPixels
+                     , mwc-random
+                     , vector
+                     
+                     , hashable-fnv1a
+                     , hashable
+  else 
+      buildable: False
+
+
 -- TODO OR RENAME
 source-repository head
   type:     git
@@ -118,7 +142,7 @@ source-repository head
 
 Executable core
  -- find dist/build/core/core-tmp -name '*dump-simpl'
-  if flag(test)
+  if flag(dev)
       buildable: True
       build-depends:       
            base
@@ -126,19 +150,19 @@ Executable core
   else 
       buildable: False
 
- ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
- ghc-options: -O2  -rtsopts  
+  ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
+  ghc-options: -O2  -rtsopts  
  
- -- Either do threaded for eventlogging and simple timing...
- --ghc-options: -threaded -eventlog
- -- and run e.g. with +RTS -N -l
+  -- Either do threaded for eventlogging and simple timing...
+  --ghc-options: -threaded -eventlog
+  -- and run e.g. with +RTS -N -l
 
- -- ...or do non-threaded runtime
- --ghc-prof-options: -fprof-auto
- --Relevant profiling RTS settings:  -xt
- -- TODO also check out +RTS -A10m, and look at output of -sstderr
+  -- ...or do non-threaded runtime
+  --ghc-prof-options: -fprof-auto
+  --Relevant profiling RTS settings:  -xt
+  -- TODO also check out +RTS -A10m, and look at output of -sstderr
 
- -- hs-source-dirs: core-example
- main-is: core.hs
- default-language:    Haskell2010
+  -- hs-source-dirs: core-example
+  main-is: core.hs
+  default-language:    Haskell2010
 

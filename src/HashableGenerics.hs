@@ -1,0 +1,1 @@
+module HashableGenerics where

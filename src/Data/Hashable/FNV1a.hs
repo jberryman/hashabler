@@ -874,11 +874,7 @@ instance Hashable BL.ByteString where
 instance Hashable BSh.ShortByteString where
     {-# INLINE hash #-}
     hash h  = 
-#   if MIN_VERSION_base(4,3,0)
-      \(BSh.SBS ba_) ->
-#   else
-      \(BSh.SBS ba_ _) ->
-#   endif
+      \(BSh.SBS ba_) -> -- when MIN_VERSION_base(4,3,0)
         let ba = P.ByteArray ba_
          in mixConstructor 0 $
               hashByteArray h (P.sizeofByteArray ba) ba

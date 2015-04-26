@@ -77,6 +77,13 @@ main = do
     viz "Text_words_hashable" $ map (fromIntegral . Their.hash) samples
     viz "Text_words_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
 
+    {-
+    -- Text    -- 4K english words, mostly starting with A
+    samples <- take 4000 . T.lines <$> T.readFile "/usr/share/dict/words"
+    viz "Text_similar_words_hashable" $ map (fromIntegral . Their.hash) samples
+    viz "Text_similar_words_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
+    -}
+
 
 
 

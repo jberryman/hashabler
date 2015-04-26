@@ -104,6 +104,7 @@ Executable bench
                      , primitive
 
                      , hashable-fnv1a
+                     , hashable
                      , criterion
                      , deepseq
   else 

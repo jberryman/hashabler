@@ -8,15 +8,18 @@ module Main (
 
 import Criterion.Main
 import Data.Word
-import Data.Hashable.FNV1a
 import Data.Int
 import Data.Ratio
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Primitive as P
 import Control.DeepSeq
+
+import Data.Hashable.FNV1a
+import qualified Data.Hashable as Their
 
 instance NFData FNV32 where rnf = rnf . fnv32 
 
@@ -28,6 +31,7 @@ hashLeftNoList = go
     where go !h 0 = fnv32 h
           go !h !b = go (h `hash` b) (b-1)
 
+-- raise hash benchmarks above criterion noise floor from function call and nf.
 hash32Times :: Hashable a=> Int -> a -> Word32
 {-# INLINE hash32Times #-}
 hash32Times iters =
@@ -75,7 +79,18 @@ main = do
             , bench "hashLeftUnfolded" $ nf (hashLeftUnfolded fnvOffsetBasis32) [1..sz]
           --, bench "hashLeftUnfolded trying to fuse" $ nf (\i-> hashLeftUnfolded fnvOffsetBasis32 (take (fromIntegral sz) $ iterate (+1) i)) 1
             ]
+
+    allWordsText <- T.readFile "/usr/share/dict/words"
+    let allWordsListText = T.lines allWordsText
+
     defaultMain [ 
+     bgroup "compare" [
+        bench "long Text, hashable" $ nf Their.hash allWordsText
+      , bench "[Text], hashable" $  nf Their.hash allWordsListText
+      , bench "long Text, hashnicely" $ nf (fnv32 . hashFNV32) allWordsText
+      , bench "[Text], hashnicely" $  nf (fnv32 . hashFNV32) allWordsListText
+      ],
+     bgroup "dev" [
         -- We can more or less subtract this from benchmarks producing a Word32 hash:
 
         bench "baseline Word32" $ nf (\x-> x) (777::Word32)
@@ -144,4 +159,6 @@ main = do
       , listBgroup "medium-size lists" 250
       -- In line with above, although NoList variants win out by a greater margin:
       --, listBgroup "small lists" 5
+
       ]
+     ]

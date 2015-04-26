@@ -12,7 +12,7 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Internal as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.ByteString.Char8 as C
-import Vectors.FNV (fnvIn, fnv1a32Out)
+import Vectors.FNV
 
 import Foreign.Marshal.Utils (fromBool)
 
@@ -61,13 +61,18 @@ checkVectors :: IO ()
 checkVectors = do
     test "Checking FNV spec vectors" $ do
         -- Check test vectors from the official FNV spec/implementation:
-        let fnvInputsHashed = map (fnv32 . hashFNV32 . C.pack) fnvIn
+        let fnvInputsHashed32 = map (fnv32 . hashFNV32 . C.pack) fnvIn
             -- Our instances perform a final 'mixConstructor' on hashes of array
             -- types (see notes on "Defining principled Hashable instances") so
             -- we'll need to do this to our test vectors before comparing:
             fnv1a32OutMassaged = map (fnv32 . mixConstructor 0 . FNV32) fnv1a32Out
-        unless (fnvInputsHashed == fnv1a32OutMassaged) $
-            error "fnvInputsHashed /= fnv1a32OutMassaged"
+        unless (fnvInputsHashed32 == fnv1a32OutMassaged) $
+            error "fnvInputsHashed32 /= fnv1a32OutMassaged"
+        -- And for 64-bit version:
+        let fnvInputsHashed64 = map (fnv64 . hashFNV64 . C.pack) fnvIn
+            fnv1a64OutMassaged = map (fnv64 . mixConstructor 0 . FNV64) fnv1a64Out
+        unless (fnvInputsHashed64 == fnv1a64OutMassaged) $
+            error "fnvInputsHashed64 /= fnv1a64OutMassaged"
         
     test "Checking generated vectors for all hash functions" $ do
         failures <- checkGeneratedVectors

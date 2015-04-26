@@ -7,8 +7,9 @@ module Data.Hashable.FNV1a (
   , Hash(..)
   -- * Hashing with the FNV-1a algorithm
   , FNV32(..)
-  , FNV64(..)
   , hashFNV32
+  , FNV64(..)
+  , hashFNV64
   -- ** Internals
   -- *** FNV Primes
   , fnvPrime32
@@ -256,13 +257,6 @@ foreign import ccall unsafe "rts_getThreadId" getThreadId :: ThreadId# -> CInt
 --  http://www.isthe.com/chongo/tech/comp/fnv/#FNV-1a
 -}
 
---  TODO TESTING HASH GOODNESS:
---    - do scatter plot distribution graph thing from arbitrary quickcheck values.
---      - Int, (Int,Int) , [Char], [Either Int Bool]
---    - also count collisions
---    - compare with Hashable
-
-
 
 
 
@@ -297,7 +291,6 @@ newtype FNV32 = FNV32 { fnv32 :: Word32 }
 newtype FNV64 = FNV64 { fnv64 :: Word64 }
     deriving (Eq, Ord, Read, Show)
 
--- TODO 64-bit hashing
 
 
 
@@ -306,7 +299,6 @@ newtype FNV64 = FNV64 { fnv64 :: Word64 }
 -- NOTE we're to hash the resulting Word8s from left to right
 
 -- TODO check inlining on these:
--- TODO MAYBE REMOVE THESE, USING NEW mix* functions
 
 bytes16 :: Word16 -> (Word8, Word8)
 {-# INLINE bytes16 #-}
@@ -318,7 +310,6 @@ bytes32 :: Word32 -> (Word8,Word8,Word8,Word8)
 bytes32 wd = (shifted 24, shifted 16, shifted 8, fromIntegral wd)
      where shifted = fromIntegral . unsafeShiftR wd
 
--- faster for 64-bit archs?
 bytes64 :: Word64 -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
 {-# INLINE bytes64 #-}
 bytes64 = \wd64->
@@ -488,7 +479,6 @@ instance Hash FNV32 where
     -- TODO look at inlining
 
 
--- TODO OR ALSO CALL fnv32 TO UNPACK THIS?
 -- | Hash a value using the standard spec-prescribed 32-bit seed value.  For
 -- relevant instances of primitive types, we expect this to produce values
 -- following the FNV1a spec.
@@ -499,6 +489,28 @@ instance Hash FNV32 where
 hashFNV32 :: Hashable a=> a -> FNV32
 {-# INLINE hashFNV32 #-}
 hashFNV32 = hash fnvOffsetBasis32
+
+
+-- | > (FNV64 h64) `mix8` b = FNV64 $ (h64 `xor` fromIntegral b) * fnvPrime64
+instance Hash FNV64 where
+    {-# INLINE mix8 #-}
+    mix8 (FNV64 h64) = \b-> FNV64 $ (h64 `xor` fromIntegral b) * fnvPrime64
+    -- TODO look at inlining
+
+
+-- | Hash a value using the standard spec-prescribed 64-bit seed value.  For
+-- relevant instances of primitive types, we expect this to produce values
+-- following the FNV1a spec.
+--
+-- This may be slow on 32-bit machines.
+--
+-- @
+--   hashFNV64 = 'hash' 'fnvOffsetBasis64'
+-- @
+hashFNV64 :: Hashable a=> a -> FNV64
+{-# INLINE hashFNV64 #-}
+hashFNV64 = hash fnvOffsetBasis64
+
 
 -- ------------------------------------------------------------------
 -- NUMERIC TYPES:

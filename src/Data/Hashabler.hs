@@ -52,7 +52,7 @@ module Data.Hashabler (
  >     hash h (Just a) = h `hash` a          -- BAD!
  >     hash h Nothing  = h `hash` (1::Word8) -- BAD!
  .
- Here @Just (1::Word8)@ hashes to the same value as @Nothing@. TODO mention how we only can make those two assumptions about @a@ here
+ Here @Just (1::Word8)@ hashes to the same value as @Nothing@.
  .
  Second and more tricky, instances should not permit a function 
  @f :: a -> (a,a)@ such that 
@@ -150,11 +150,11 @@ import GHC.Prim(ThreadId#)
 
 -- For TypeRep
 import Data.Typeable
+import GHC.Fingerprint.Type(Fingerprint(..))
 #if  __GLASGOW_HASKELL__ >= 710
-import GHC.Fingerprint.Type(Fingerprint(..))
-#elif __GLASGOW_HASKELL__ >= 702
+#else 
+-- __GLASGOW_HASKELL__ >= 702
 import Data.Typeable.Internal(TypeRep(..))
-import GHC.Fingerprint.Type(Fingerprint(..))
 #endif
 
 import System.Mem.StableName
@@ -218,9 +218,7 @@ unsafeCoerceIntWord32 = unsafeCoerce
 -- unsafeCoerceWordWord32 :: Word -> Word32
 -- unsafeCoerceWordWord32 = unsafeCoerce
 #endif
-
   -- But why is that? The unsafeCoerce version simply has more instructions AFAICT!
-    -- TODO TEST EQUIVALENCE TO fromIntegral
 
 
 #if MIN_VERSION_base(4,7,0)
@@ -421,7 +419,6 @@ class Hashable a where
 -- @mix@-ing in larger word chunks for performance reasons. For instance a hash
 -- function which operates on four bytes at a time might make use of 'mix32',
 -- and perhaps in 'mix8' pad with three additional 0s.
--- TODO or just say "see instance for 'Murmur32'."
 class (Eq h)=> Hash h where
     -- | Hash in one byte.
     mix8 :: h -> Word8 -> h
@@ -444,48 +441,6 @@ class (Eq h)=> Hash h where
        let (b0,b1,b2,b3) = bytes32 wd32
         in h `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 
 
-
-    -- TODO  Possibly more methods, BUT FIRST have tests so we ensure consistency after change
-    -- TODO minimal is any one of these (they cascade down and wrap around)
-    --  :: h -> (Word8,Word8) -> h
-    --  :: h -> (Word8,Word8,Word8,Word8) -> h
-    --  :: h -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8) -> h
-    -- TODO or should these actually be Word16,Word32,Word64?
-    -- TODO
-    --   + how would default methods work?
-    --        h <# h32 = (h <# h16) <# h16 -- 2 fromIntegral casts + one shift
-    --        h <# h16 = (h <# h8) <# h8 -- 2 fromIntegral casts + one shift
-    --     So for no implementation of h32 or h16, this would expand to:
-    --        h <# h32  = ((((h <# h8) <# h8) <# h8) <# h8
-    --     GOOD!
-    --   - look at Hashable instances that would call wider tuples, and see if that's possible/less work
-    --     - summary: 
-    --        - Char: 2/4
-    --        - all Word/Int/Float (obviously)  2/4/8
-    --        - ByteString/ByteArray: (if we can become endian-aware!)  8
-    --        - Text: 2 (on LE) and 8 (on BE, or on LE if we want to do 2 shifts + 2 AND + OR?)
-    --     - think re. how all Word sizes are stored as Word
-    --   - look at murmurhash and see what data it takes.
-    --   - So, cascading & default methods brainstorm:
-    --     - minimal instance is mix1 (left without default)
-    --     - user must ensure that instances here result in identical for all combinations?
-    --       - This is okay e.g. for murmurhash which expects 4 but might get 1:
-    --          - it can be a sum type, function awaiting 3 more bytes.
-    --          - when hashing all finished hash can be extracted by applying it sufficiently to 0
-    --       - BUT!: This can kill efficiency of word-size hashing, e.g. 
-    --          - a constructor requiring 1 more to fill and receiving a string of 4-bytes
-    --          - TODO what is the issue exactly? When/why can't instances
-    --              getting fewer than expected just pad with 0s or something?
-    --          - IDEA: make one of the types platformDependent: mixWord!
-    --          - SO: ... ?
-    --       
-    --  TODO DOCS:
-    --      mention/clarify that Words are delivered in the same order, by Hashable
-    --      instances, regardless of chunk size? ACTUALLY: we might like that
-    --      choice of chunk size is platform-specific! So the user must ensure the
-    --      same hash value regardless of if instance calls mix4 or mix8. IS THIS
-    --      REASONABLE/POSSIBLE FOR e.g. MURMURHASH?
-    -- 
 
 
 -- FNV HASH KERNELS -------------------------------------------------
@@ -866,11 +821,10 @@ instance Hashable Word64 where
 -- Since below have variable-length, we'll use this helper (which is also
 -- useful for multi-constructor types):
 
--- TODO rename, or maybe just remove?
 mixConstructor :: (Hash h)
                => Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
-               -> h -- ^ Hash value TODO remove this comment, or clarify whether this should be applied first or last, or whether it matters.
-               -> h -- ^ New hash value
+               -> h      -- ^ Hash value to mix our byte into
+               -> h      -- ^ New hash value
 {-# INLINE mixConstructor #-}
 mixConstructor n = \h-> h `mix8` (0xFF - n)
 
@@ -963,13 +917,10 @@ typeRepInt32 =
 # if __GLASGOW_HASKELL__ >= 710
     -- Fingerprint is just the MD5, so taking any Int from it is fine
     (\(Fingerprint i64 _) -> fromIntegral i64) . typeRepFingerprint
-# elif __GLASGOW_HASKELL__ >= 702
+# else
+-- __GLASGOW_HASKELL__ >= 702
     -- Fingerprint is just the MD5, so taking any Int from it is fine
     \(TypeRep (Fingerprint i64 _) _ _) -> fromIntegral i64
-# else
--- okay at least in base < 4.4 && >= 4:
--- THOUGH NOTE TODO: here the actual key may vary from run to run
-    fromIntegral . unsafeDupablePerformIO . typeRepKey
 # endif
 
 
@@ -1063,108 +1014,8 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
     {-# INLINE hash #-}
     hash hsh (a,b,c,d,e,f,g,h) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h
 
--- NOTES:
---   - no overhead from fromIntegral
---              1 iteration  =  9.37 (+0)
---              4 iterations = 12.66 (+3.3)  0.8
---              8 iterations = 17.83 (+8.5)  1.1
---   - baseline for id = 9.494
---   - using Word instead of Word32 explicitly doesn't matter
---   - using all Int and no fromIntegrals doesn't matter
---   - Compiling w/ LLVM was no better.
---   - using unsafeShiftR to get bytes is fast and probably our best choice
---   - largeword is much too slow to be usable
---   - 64-bit multiplication is slow on 32-bit (overhead of ~10ns)
---   - bytes64 is very slow on 32-bit
---   - TODO we could use SIMD vectors for wider than 32 hash bits!
---      - but need to test that this is principled.
---      - We don't have xor exposed in SIMD primops; instead try to target LLVM autovectorization?: http://llvm.org/docs/Vectorizers.html
---
--- TESTING NOTES:
---   - test that Generic instances derived from identically-shaped types match in every way behavior of instances defined here
---   - avalanche etc. properties for both primitive and compount instances
---
--- TODO IMPLEMENTATION:
---   - hash functions with user's seed (we pass this in recursively on e.g. list)
---   - 32- and 64-bit hashes (other lengths are impractical)
---   - arbitrary-length hashes with user-supplied seed
---     - possibly both 32 and 64-bit chunks, for speed on different arches
---     - possibly using SIMD vectors!
---     - NOTE: we need to check seed avalance here.
---   - documentation:
---     - versioning
---     - expectations of randomness
---     - expectation of permanence (re. to serializability)
---     - performance concerns
---
 -- WISHLIST:
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.
---
--- CROSS-PLATFORM NOTES:
---   - Int is a bit weird; it's like Word split and wrapped around
---     - on 64-bit if the first 32 bits of a Word are 1s (it's negative) or all zeros, then we can truncate it to 32 smallest bits (fromIntegral does this conversion both ways)
---       - probably do this with fromIntegral (what is the safe way to check that the conversion is lossless?)
---       - see also: http://stackoverflow.com/questions/15047191/read-write-haskell-integer-in-twos-complement-representation
---     - however if we're trying to be compatible with OTHER IMPLEMENTATIONS, it's not clear we can/should do that
---     - endianness:
---       - the draft here: http://tools.ietf.org/html/draft-eastlake-fnv-08#page-5 ...
---         suggests doing arithmetic in little endian (which is nice for us on intel) so we should be able to do conversions on others
---       - can use byteSwap* functions from Data.Word (available on base 4.7 and above)
---       - we can use ByteString builder to build bytestring from various endiannesses: http://hackage.haskell.org/package/bytestring-0.10.4.1/docs/Data-ByteString-Builder.html#g:4
---          TODO + Benchmark builder with Int
---                  - super slow (200ns)
---               + test Serialized from ghc package (ghc api)
---                  - super slow (~300ns to serialize a Word)
---               x along with SmallByteString (and somehow writing Ints efficiently)
---                  - No reason to serialize things to bytestring; just hash as we go.
---               + Benchmark largeword multpilication and xor
---                  - fromIntegral is very slow; multiplication is outrageously slow
---               + How do 64-bits fare on 32-bit machines?
---               + Are there other choices of basis we can use to extend beyond 32 bit hashes?
---                 - YES! any non-zero offset basis ought to be fine, in terms of hashing.
---                 - but note: if we want cross-platform compatible, then we'll need to use their prescribed bases.
---
--- QUESTIONS:
---   - principled way to test for lossless convertable Ints / Words (maybe look at impl of fromInteger)
---   + fastest way to get access to bytes of integer types
-
----------------- LIST INSTANCE SCRATCH WORK:
-
-
--- testing. TODO NOTE: we're omiting handling of empty vs. full list, so these aren't valid yet! ------
-
--- TODO more different benchmarks of different types of lists, and ways of
--- constructing, and examine which of these two to use (and when):
---   We might be able to NOINLINE hashLeftUnfolded version (if performance
---   unaffected), and then re-write to hashFoldl' version based on argument
---   TODO :
---     or use our own rules so that we can get both fusion and unrolling?
---     (or would that not be helpful, since values already in a register?)
-
--- 7.10
---   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  339.4 ns  !! MATCHING BASELINE
---   APPLIED TO ([1.. 250 :: Word8])                  1.766 μs
--- 7.8
---   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  8.938 μs  -- NOTE: in general, 7.8 seems to do poorly applying folds to this in the context of criterion benchmarks
---   APPLIED TO ([1.. 250 :: Word8])                  846.5 ns
-hashFoldl' :: (Hashable a, Hash h)=> h -> [a] -> h
--- hashFoldl' :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
-{-# INLINE hashFoldl' #-}
-hashFoldl' = foldl' (\h' a-> h' `hash` a)
-
--- 7.10
---   APPLIED TO ([1.. 250 :: Word8])                  675.6 ns
--- 7.8
---   APPLIED TO ([1.. 250 :: Word8])                  729.6 ns
-hashLeftUnfolded :: (Hashable a, Hash h)=> h -> [a] -> h
--- hashLeftUnfolded :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
-{-# INLINE hashLeftUnfolded #-}
-hashLeftUnfolded = go
-    where go !h [] = h
-          -- This seems to be sweet spot on my machine:
-          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash` a1 `hash` a2 `hash` a3 `hash` a4 `hash` a5 `hash` a6) as
-          go !h (a1:as) = go (h `hash` a1) as
-
 
 
 -- This is about twice as fast as a loop with single byte peeks:
@@ -1272,3 +1123,45 @@ hashByteArray h !lenBytes ba =
                 let b0 = P.indexByteArray ba ix
                  in hashRemainingBytes (hAcc `mix8` b0) (ix+1)
      in hash8ByteLoop h 0 
+
+
+
+
+---------------- LIST INSTANCE SCRATCH WORK:
+-- 
+-- We need to look at how inlining progresses and figure out a way to have our
+-- list instance be optimal. See scratch work below.
+
+
+
+-- TODO more different benchmarks of different types of lists, and ways of
+-- constructing, and examine which of these two to use (and when):
+--   We might be able to NOINLINE hashLeftUnfolded version (if performance
+--   unaffected), and then re-write to hashFoldl' version based on argument
+--   TODO :
+--     or use our own rules so that we can get both fusion and unrolling?
+--     (or would that not be helpful, since values already in a register?)
+
+-- 7.10
+--   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  339.4 ns  !! MATCHING BASELINE
+--   APPLIED TO ([1.. 250 :: Word8])                  1.766 μs
+-- 7.8
+--   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  8.938 μs  -- NOTE: in general, 7.8 seems to do poorly applying folds to this in the context of criterion benchmarks
+--   APPLIED TO ([1.. 250 :: Word8])                  846.5 ns
+hashFoldl' :: (Hashable a, Hash h)=> h -> [a] -> h
+-- hashFoldl' :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
+{-# INLINE hashFoldl' #-}
+hashFoldl' = foldl' (\h' a-> h' `hash` a)
+
+-- 7.10
+--   APPLIED TO ([1.. 250 :: Word8])                  675.6 ns
+-- 7.8
+--   APPLIED TO ([1.. 250 :: Word8])                  729.6 ns
+hashLeftUnfolded :: (Hashable a, Hash h)=> h -> [a] -> h
+-- hashLeftUnfolded :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
+{-# INLINE hashLeftUnfolded #-}
+hashLeftUnfolded = go
+    where go !h [] = h
+          -- This seems to be sweet spot on my machine:
+          go !h (a1:a2:a3:a4:a5:a6:as) = go (h `hash` a1 `hash` a2 `hash` a3 `hash` a4 `hash` a5 `hash` a6) as
+          go !h (a1:as) = go (h `hash` a1) as

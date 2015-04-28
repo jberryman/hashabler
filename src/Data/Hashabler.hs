@@ -3,6 +3,23 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash , UnliftedFFITypes #-}
 module Data.Hashabler (
+{- | The core of this library consists of 
+     
+     - the 'Hashable' class which defines how hashable chunks of bytes are
+       delivered to a hash function; new instances can be defined to support
+       the hashing of new datatypes using an existing algorithm
+
+     - the 'Hash' class which implements a particular hashing algorithm,
+       consuming bytes delivered in 'hash'; new instances can be defined to
+       support hashing 'Hashable' types with a new algorithm.
+
+  Currently we implement only the 32 and 64-bit variations of the FNV-1a
+  non-cryptographic hashing algorithm ('hashFNV32' and 'hashFNV64'), which have
+  good hashing properties and are easy to implement in different languages and
+  on different platforms.
+
+  Please see the project description for more information.
+ -}
     Hashable(..)
   , Hash(..)
   -- * Hashing with the FNV-1a algorithm
@@ -24,7 +41,7 @@ module Data.Hashabler (
 
   -- * Creating Hash and Hashable instances
   , mixConstructor
-  -- ** Defining principled Hashable instances
+  -- ** Defining principled Hashable instances #principled#
 {- | 
  Special care needs to be taken when defining instances of Hashable for your
  own types, especially for recursive types and types with multiple
@@ -368,8 +385,6 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
 
 
--- TODO ENDIANNESS make a note and revisit instances: USE BIG ENDIAN (mostly because of network byte order)
---        - e.g. see Double and Float
 
 -- | A class of types that can be converted into a hash value.  We expect all
 -- instances to display "good" hashing properties (w/r/t avalanche, bit
@@ -377,9 +392,10 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 --
 -- We try to ensure that bytes are extracted from values in a way that is
 -- portable across architectures (where possible), and straightforward to
--- replicate on other platforms. Exceptions are *NOTE*-ed in instance docs.
+-- replicate on other platforms and in other languages. Exceptions are
+-- *NOTE*-ed in instance docs.
 --
--- See the section "Defining Hashable instances" for details of what we expect
+-- See the section <#principled "Defining Hashable instances"> for details of what we expect
 -- from instances.
 class Hashable a where
     -- | Add the bytes from the second argument into the hash, producing a new

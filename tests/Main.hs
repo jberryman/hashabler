@@ -1,7 +1,7 @@
 {-# LANGUAGE CPP #-}
 module Main where
 
-import Data.Hashable.FNV1a
+import Data.Hashabler
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 #if MIN_VERSION_bytestring(0,10,4)

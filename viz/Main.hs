@@ -11,7 +11,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import qualified Data.Hashable as Their
-import qualified Data.Hashable.FNV1a as Our
+import qualified Data.Hashabler as Our
 
 -- A quick tool to visualize distributions. 
 --
@@ -39,49 +39,49 @@ main = do
 
     -- Int
     viz "hashable_Word32" $ map ((fromIntegral :: Int -> Word32) . Their.hash) samples
-    viz "hashnicely_Word32" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "hashabler_Word32" $ map (Our.fnv32 . Our.hashFNV32) samples
 
     -- Word8
     samples <- V.toList <$> (withSystemRandom . asGenST $ \gen -> uniformVector gen (1024*1024))
     viz "hashable_Word8" $ map (fromIntegral . Their.hash) (samples :: [Word8])
-    viz "hashnicely_Word8" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "hashabler_Word8" $ map (Our.fnv32 . Our.hashFNV32) samples
  
  -}    
 
     -- (Word8 , Word8)
     samples <- V.toList <$> (withSystemRandom . asGenST $ \gen -> uniformVector gen (1024*1024))
     viz "Word8,Word8_hashable" $ map (fromIntegral . Their.hash) (samples :: [(Word8,Word8)])
-    viz "Word8,Word8_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "Word8,Word8_hashabler" $ map (Our.fnv32 . Our.hashFNV32) samples
     
     -- (Word8, Word8 , Word8)
     samples <- V.toList <$> (withSystemRandom . asGenST $ \gen -> uniformVector gen (1024*1024))
     viz "Word8,Word8,Word8_hashable" $ map (fromIntegral . Their.hash) (samples :: [(Word8,Word8,Word8)])
-    viz "Word8,Word8,Word8_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "Word8,Word8,Word8_hashabler" $ map (Our.fnv32 . Our.hashFNV32) samples
 
     -- [Ordering]  -- exhaustive, of length 10 (~59K)
     let samples 0 = [[]]
         samples n = let ss = samples (n-1)
                      in map (LT:) ss ++ map (GT:) ss ++ map (EQ:) ss
     viz "List_10_Ordering_hashable" $ map (fromIntegral . Their.hash) $ samples 10
-    viz "List_10_Ordering_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) $ samples 10
+    viz "List_10_Ordering_hashabler" $ map (Our.fnv32 . Our.hashFNV32) $ samples 10
 
     -- [Either Int Bool] -- of random length 0 .. 100
 
     -- String  -- 100K english words
     samples <- lines <$> readFile "/usr/share/dict/words"
     viz "String_words_hashable" $ map (fromIntegral . Their.hash) samples
-    viz "String_words_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "String_words_hashabler" $ map (Our.fnv32 . Our.hashFNV32) samples
 
     -- Text    -- 100K english words
     samples <- T.lines <$> T.readFile "/usr/share/dict/words"
     viz "Text_words_hashable" $ map (fromIntegral . Their.hash) samples
-    viz "Text_words_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "Text_words_hashabler" $ map (Our.fnv32 . Our.hashFNV32) samples
 
     {-
     -- Text    -- 4K english words, mostly starting with A
     samples <- take 4000 . T.lines <$> T.readFile "/usr/share/dict/words"
     viz "Text_similar_words_hashable" $ map (fromIntegral . Their.hash) samples
-    viz "Text_similar_words_hashnicely" $ map (Our.fnv32 . Our.hashFNV32) samples
+    viz "Text_similar_words_hashabler" $ map (Our.fnv32 . Our.hashFNV32) samples
     -}
 
 

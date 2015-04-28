@@ -2,7 +2,7 @@
 module Main (main) where
 
 import Data.Word
-import Data.Hashable.FNV1a
+import Data.Hashabler
 
 main = print $ (hash32Times 1000000000) (9999::Word32)
 

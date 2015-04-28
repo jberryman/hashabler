@@ -5,7 +5,7 @@ import Control.Applicative
 import Data.Maybe
 import System.Directory
 import Control.Monad
-import Data.Hashable.FNV1a
+import Data.Hashabler
 import System.Random
 
 

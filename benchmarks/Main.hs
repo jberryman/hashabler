@@ -18,7 +18,7 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Primitive as P
 import Control.DeepSeq
 
-import Data.Hashable.FNV1a
+import Data.Hashabler
 import qualified Data.Hashable as Their
 
 instance NFData FNV32 where rnf = rnf . fnv32 
@@ -87,8 +87,8 @@ main = do
      bgroup "compare" [
         bench "long Text, hashable" $ nf Their.hash allWordsText
       , bench "[Text], hashable" $  nf Their.hash allWordsListText
-      , bench "long Text, hashnicely" $ nf (fnv32 . hashFNV32) allWordsText
-      , bench "[Text], hashnicely" $  nf (fnv32 . hashFNV32) allWordsListText
+      , bench "long Text, hashabler" $ nf (fnv32 . hashFNV32) allWordsText
+      , bench "[Text], hashabler" $  nf (fnv32 . hashFNV32) allWordsListText
       ],
      bgroup "dev" [
         -- We can more or less subtract this from benchmarks producing a Word32 hash:

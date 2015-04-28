@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash , UnliftedFFITypes #-}
-module Data.Hashable.FNV1a (
+module Data.Hashabler (
     Hashable(..)
   , Hash(..)
   -- * Hashing with the FNV-1a algorithm
@@ -78,7 +78,6 @@ module Data.Hashable.FNV1a (
  rely on the hashing of child elements being uncorrelated. That might be one
  interpretation of the mistake in our faulty @Maybe@ instance above
  -}
- -- *** TODO notes on Generic deriving
   
   
   

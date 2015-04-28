@@ -38,6 +38,8 @@ import Data.Typeable
 import Data.Ratio
 import System.IO.Unsafe(unsafeDupablePerformIO)
 
+import Prelude
+
 
 
 -- Simply for checking that our Hash and Hashable instances are the same across
@@ -98,7 +100,7 @@ instance Show P.ByteArray where
         let s = P.sizeofByteArray ba 
             s8 = fromIntegral s :: Word8
          in assert (s<= (fromIntegral (maxBound :: Word8))) $ 
-             "P.pack "++(show [1 .. s8])
+             "P.ByteArray of size "++(show s)++" filled with bytes "++(show s8)
 
 -- Enumerate our Show/Read-able Hashable instances for generating/checking:
 forHashableInstances :: (forall h h'. (Read h, Show h, Hashable h, Show h', Hashable h')
@@ -173,8 +175,7 @@ forHashableInstances ioUnhandled = sequence [
          in map (`take` wds) [1,2,3,5,8,13,100,10000] 
   , io "Ratio_Word8" $ storedRandom $ ((replicateM 1000 $ (%) <$> randomIO <*> (randomRIO (1,maxBound))) :: IO [Ratio Word8])
 
-  -- For now, just on >= 7.2:
-#if __GLASGOW_HASKELL__ >= 702
+-- if __GLASGOW_HASKELL__ >= 702
   {- These aren't consistent across GHC versions, and we have no promise that
      that will be the case going forward. Comment for now. Stored vectors match
      GHC 7.10, and are kept in the repo for now.
@@ -188,7 +189,7 @@ forHashableInstances ioUnhandled = sequence [
                          -- TODO sufficient?
                          ])
   -}
-#endif
+
   , io "Maybe_Word8" (justThese (Nothing : map Just [minBound::Word8 .. maxBound])  )
   , io "Either_Word8_Bool" (justThese (Right True : Right False : map Left [minBound::Word8 .. maxBound]) )
   , io "Tuple2_Word8" $ storedRandom $ (replicateM 1000 $ (,) <$> randomIO <*> randomIO :: IO [(Word8,Word8)])
@@ -200,6 +201,10 @@ forHashableInstances ioUnhandled = sequence [
   , io "Tuple8_Word8" $ storedRandom $ (replicateM 1000 $ (,,,,,,,) <$> randomIO <*> randomIO <*> randomIO <*> randomIO <*> randomIO <*> randomIO <*> randomIO <*> randomIO :: IO [(Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)])
   ] where io nm f = ioUnhandled nm f `onException` (putStrLn $ " !!! in forHashableInstances "++nm)
 
+-- TODO these tests are almost entirely for Hashable, so only test vectors
+-- against FNV32, even when we add more hash functions. Then test those
+-- separately for consistency.
+--
 -- forHashFunctions :: (forall a1 h. (Hash h, Hashable a1) =>
 --                           String -> (a1 -> h) -> IO a) -> IO [a] -- TODO fix
 forHashFunctions io = sequence [
@@ -226,7 +231,6 @@ regenerateVectors vs = void $
                 writeFile inFile $ show ins
                 regenerateOuts ins
 
--- TODO IS INSTANCE FOR LAZY BYTESTRINGS SHITTY AND SLOW W/ SPAC LEAK?
 
 -- Return a (hopefully empty) list of failed cases:
 --                  input type, hash, input, correct output, actual output

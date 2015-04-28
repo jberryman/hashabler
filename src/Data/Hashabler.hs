@@ -137,6 +137,9 @@ import Data.Array.ST (newArray, readArray, MArray, STUArray)
 import Data.Array.Unsafe (castSTUArray)
 import GHC.ST (runST, ST)
 
+import Data.Version(Version, versionBranch)
+import Data.Unique(Unique, hashUnique)
+
 -- for reading the bytes of ByteStrings:
 import System.IO.Unsafe (unsafeDupablePerformIO)
 
@@ -974,9 +977,17 @@ typeRepInt32 =
 -- 'hashStableName'.
 instance Hashable (StableName a) where
     {-# INLINE hash #-}
-    hash h = hash h . hashStableName
+    hash h = \x-> hash h $ hashStableName x
     
+-- | The (now deprecated) @versionTags@ field is ignored, and we follow the
+-- 'Eq' instance which does not ignore trailing zeros.
+instance Hashable Version where
+    {-# INLINE hash #-}
+    hash h = \x-> hash h $ versionBranch x
 
+instance Hashable Unique where
+    {-# INLINE hash #-}
+    hash h = \x-> hash h $ hashUnique x
 
 -- ------------------------------------------------------------------
 -- ALGEBRAIC DATA TYPES:

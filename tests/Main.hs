@@ -33,6 +33,9 @@ import Test.QuickCheck
 import GHC.Natural (Natural)
 #endif
 
+import Prelude
+
+
 main :: IO ()
 main = do
     hSetBuffering stdout NoBuffering
@@ -55,6 +58,7 @@ main = do
 
 testsMain :: IO ()
 testsMain = do
+    checkMiscUnitTests
     checkVectors
     checkHashableInstances
 
@@ -80,6 +84,8 @@ checkVectors = do
         unless (null failures) $
             print failures >> error "Got some failures in checkGeneratedVectors!"
 
+checkMiscUnitTests :: IO ()
+checkMiscUnitTests = do
     -- Basic unit tests for Float, with IEEE byte values pulled from this
     -- calculator: http://www.h-schmidt.net/FloatConverter/IEEE754.html
     test "Getting bytes from Float" $
@@ -110,9 +116,25 @@ checkVectors = do
 
     quickCheck1000 checkSignByte
     quickCheck1000 checkIntegerFallback
+
     quickCheck1000 check32BitRangeInt64
     quickCheck1000 check32BitRangeWord64
+    -- And make sure we check max and min bounds (esp minBound Int!):
+    test "check 32-bit range Ints and Words" $
+        unless (check32BitRangeInt64  (Large minBound) &&
+                check32BitRangeInt64  (Large maxBound) &&
+                check32BitRangeWord64  (Large maxBound)) $
+            error "Problem with check32BitRange* functions"
+                
     quickCheck1000 checkBytes64Alternatives
+
+    test "Magnitude of Int... " $
+            -- we're mostly just concerned with minBound
+        let ints = [minBound, minBound+1, (-42), (-1), 0, 1, 42, maxBound ] :: [Int]
+            intsMag = map magnitudeAsWord ints
+         in unless (map show intsMag == map (dropWhile (=='-') . show) ints) $
+                error $ "problem with magnitudeAsWord: "++(show intsMag)
+    
 
 
 -- Checking properties of Hashable instances by way of FNV32 hash.

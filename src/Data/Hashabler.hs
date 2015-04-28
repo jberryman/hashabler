@@ -103,6 +103,7 @@ module Data.Hashabler (
   , hashFoldl'
   , hashLeftUnfolded
   , bytesFloat, bytesDouble
+  , magnitudeAsWord
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
   , _bytes64_32 , _bytes64_64, _signByte
 #endif
@@ -511,7 +512,7 @@ instance Hashable Integer where
 #ifdef MIN_VERSION_integer_gmp
     hash h = \i-> case i of
       (S# n#) ->
-        let magWord = fromIntegral $ abs (I# n#)
+        let magWord = magnitudeAsWord (I# n#)
             sign = _signByte (I# n#)
          in mixConstructor sign $ 
 #           if WORD_SIZE_IN_BITS == 32
@@ -545,9 +546,13 @@ instance Hashable Integer where
 --    even though I can't get that case to occur in practice:
       (J# 0# _) -> mixConstructor 0 (h `mix32` 0)
       (J# sz# ba#) -> 
+             -- Note, (abs minBound == minBound) but I don't think that value
+             -- is possible since we wouldn't even be able to specify the size
+             -- (maxBound+1) as an Int value.
          let numLimbs = abs (I# sz#)
              sign = _signByte (I# sz#)
-          in mixConstructor sign $ 
+          in assert ((I# sz#) /= minBound) $
+              mixConstructor sign $ 
                hash32BigNatByteArrayBytes h numLimbs (P.ByteArray ba#)
 #   endif
 
@@ -566,6 +571,16 @@ _signByte :: Int -> Word8
 _signByte n = fromIntegral ((fromIntegral n :: Word) 
                               `unsafeShiftR` (WORD_SIZE_IN_BITS - 1))
 
+-- Exposed for testing. In particular we ensure that magnitudeAsWord minBound
+-- is correct.
+-- TODO make Int -> Word, and use fromIntegral at usage site, maybe
+magnitudeAsWord :: Int 
+#             if WORD_SIZE_IN_BITS == 32
+                -> Word32
+#             else
+                -> Word64
+#             endif
+magnitudeAsWord = fromIntegral . abs
 
 #if WORD_SIZE_IN_BITS == 64
 -- Helper for hashing a 64-bit word, possibly omiting the first 32-bit chunk
@@ -746,7 +761,8 @@ _hash32_Int_64 :: (Hash h)=> h -> Int64 -> h
 {-# INLINE _hash32_Int_64 #-}
 _hash32_Int_64 h = \i->
     -- Can we losslessly cast to 32-bit representation?
-    if abs i <= (fromIntegral (maxBound :: Int32))
+    if i <= (fromIntegral (maxBound :: Int32)) && 
+       i >= (fromIntegral (minBound :: Int32)) -- TODO benchmark and maybe use (.&.), and check ==0
         then hash h (fromIntegral i :: Int32)
         else hash h i
 

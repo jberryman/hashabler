@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Applicative
 import Data.Word
 import Data.Bits
 import Data.Array

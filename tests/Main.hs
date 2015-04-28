@@ -22,6 +22,7 @@ import Control.Exception(assert)
 import Consistency(generatedVectorsDir, checkGeneratedVectors, regenerateVectors)
 import System.Directory
 import Control.Monad
+import Control.Applicative
 import Data.List
 
 import Data.Word

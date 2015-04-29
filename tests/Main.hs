@@ -117,11 +117,11 @@ checkMiscUnitTests = do
          in unless (x == 0x78563412 && y == 0x8765432178563412) $ 
               error $ "Problem with byteSwap: "++(show x)++" "++(show y)
 
-    quickCheck1000 checkSignByte
-    quickCheck1000 checkIntegerFallback
+    quickCheckErr 1000 checkSignByte
+    quickCheckErr 1000 checkIntegerFallback
 
-    quickCheck1000 check32BitRangeInt64
-    quickCheck1000 check32BitRangeWord64
+    quickCheckErr 1000 check32BitRangeInt64
+    quickCheckErr 1000 check32BitRangeWord64
     -- And make sure we check max and min bounds (esp minBound Int!):
     test "check 32-bit range Ints and Words" $
         unless (check32BitRangeInt64  (Large minBound) &&
@@ -129,7 +129,7 @@ checkMiscUnitTests = do
                 check32BitRangeWord64  (Large maxBound)) $
             error "Problem with check32BitRange* functions"
                 
-    quickCheck1000 checkBytes64Alternatives
+    quickCheckErr 1000 checkBytes64Alternatives
 
     test "Magnitude of Int... " $
             -- we're mostly just concerned with minBound
@@ -144,7 +144,7 @@ checkMiscUnitTests = do
 checkHashableInstances :: IO ()
 checkHashableInstances = do
     -- small Integers should match Word32/64 (depending on size) + a mixConstructor 0:
-    quickCheck1000 $
+    quickCheckErr 1000 $
         \(Large int64) -> 
            let magWord64 = fromIntegral $ abs (int64::Int64) :: Word64
                signByte = if int64 < 0 then 1 else 0
@@ -156,21 +156,21 @@ checkHashableInstances = do
 
     -- FNV32 test vectors provide basic sanity for word/int instances. Here
     -- just make sure Word and Int types are equivalent.
-    quickCheck1000 $
+    quickCheckErr 1000 $
         \(Large word8)-> let int8 = fromIntegral (word8 :: Word8) :: Int8
                           in hashFNV32 word8 == hashFNV32 int8
-    quickCheck1000 $
+    quickCheckErr 1000 $
         \(Large word16)-> let int16 = fromIntegral (word16 :: Word16) :: Int16
                            in hashFNV32 word16 == hashFNV32 int16
-    quickCheck1000 $
+    quickCheckErr 1000 $
         \(Large word32)-> let int32 = fromIntegral (word32 :: Word32) :: Int32
                            in hashFNV32 word32 == hashFNV32 int32
-    quickCheck1000 $
+    quickCheckErr 1000 $
         \(Large word64)-> let int64 = fromIntegral (word64 :: Word64) :: Int64
                            in hashFNV32 word64 == hashFNV32 int64
     -- And for machine-dependenat Word/Int check equivalence to Int/Word32 when
     -- in 32-bit range, else (only relevant on 64-bit machines) to Int/Word64:
-    quickCheck1000 $
+    quickCheckErr 1000 $
         \(Large word)->
             hashFNV32 (word :: Word)
                  == (if word > fromIntegral (maxBound :: Word32)
@@ -179,7 +179,7 @@ checkHashableInstances = do
 
 #  if MIN_VERSION_base(4,8,0)
     -- Check documented 32-bit chunked, big-endian order hashing of Natural:
-    quickCheck1000 $ do
+    quickCheckErr 1000 $ do
         let checkNat nibbles = 
               let (nat,bytesBE) = naturalNibbles nibbles
                   testSane = (length bytesBE) `mod` 4 == 0
@@ -198,7 +198,7 @@ checkHashableInstances = do
 
     -- Check that equivalent strict and lazy ByteStrings (of varying chunk
     -- sizes) hash to the same:
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBS (bs,chunkSize) = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
@@ -212,7 +212,7 @@ checkHashableInstances = do
             return (bs,chunkSize)
 
     -- ...likewise for Text
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBS (bs,chunkSize) = 
               let cs = take bs $ cycle $ take 199 $ iterate succ '0'
                   bsStrict = T.pack cs
@@ -227,7 +227,7 @@ checkHashableInstances = do
 
 #  if MIN_VERSION_bytestring(0,10,4)
     -- Check that ShortByteStrings hash like big strict ones:
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBS bs = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
@@ -240,7 +240,7 @@ checkHashableInstances = do
 #  endif
     
     -- Check that ByteStrings hash like [Word8]
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBS bs = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
@@ -251,7 +251,7 @@ checkHashableInstances = do
             growingElements [1..maxBytes]
 
     -- Check that P.ByteArrays hash like [Word8]
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBA bs = 
               let wd8s = take bs $ iterate (+1) 0
                   byteArr = packByteArray wd8s
@@ -264,7 +264,7 @@ checkHashableInstances = do
     -- Check that ByteStrings hash like [Word8], after some arbitrary
     -- equivalent transformations (we mainly want to exercise handling of the
     -- length and offset in the ByteString internals)
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBS (bs,takeVal,dropVal) = 
               let wd8s = take bs $ iterate (+1) 0
                   b = B.take takeVal $ B.drop dropVal $ B.pack wd8s
@@ -281,7 +281,7 @@ checkHashableInstances = do
     -- Check that Text is hashed in big endian, making sure we get some
     -- double-size codes, by encoding as a ByteString and comparing the hashes
     -- of both
-    quickCheck $ do
+    quickCheckErr 100 $ do
         let checkBS largeCs = 
               let t = T.pack $ map (toEnum . clean . getLarge) largeCs
                   clean = (`mod` fromEnum (maxBound :: Char))
@@ -301,35 +301,35 @@ checkHashableInstances = do
 
     -- Check that String and Text instances are identical for valid unicode
     -- code points:
-    quickCheck1000 $ \sDirty -> 
+    quickCheckErr 1000 $ \sDirty -> 
         let s = map T.safe sDirty
          in (hashFNV32 $ T.pack s) == hashFNV32 s
 
     -- checking collisions in an ad hoc way; we especially care about our sum
     -- types with fixed shape. TODO improve; also this is slower than necessary
-    quickCheck $ checkCollisionsOf (undefined :: Bool) 4
-    quickCheck $ checkCollisionsOf (undefined :: Ordering) 9
-    quickCheck $ checkCollisionsOf (undefined :: Either () ()) 4
-    quickCheck $ checkCollisionsOf (undefined :: Maybe ()) 4
-    quickCheck $ checkCollisionsOf (undefined :: [()]) 10000
-    quickCheck $ checkCollisionsOf (undefined :: TreeOfSums1) 100
-    quickCheck $ checkCollisionsOf (undefined :: TreeOfSums2) 1000
-    quickCheck $ checkCollisionsOf (undefined :: TreeOfSums3) 9
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: Bool) 4
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: Ordering) 9
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: Either () ()) 4
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: Maybe ()) 4
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: [()]) 10000
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: TreeOfSums1) 100
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: TreeOfSums2) 1000
+    quickCheckErr 100 $ checkCollisionsOf (undefined :: TreeOfSums3) 9
 
     -- Check tuples match lists, plus a mixConstructor.
-    quickCheck $ forAll (vector 2 :: Gen [Word8]) $ \ l@[a,b] ->
+    quickCheckErr 100 $ forAll (vector 2 :: Gen [Word8]) $ \ l@[a,b] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b))
-    quickCheck $ forAll (vector 3 :: Gen [Word8]) $ \ l@[a,b,c] ->
+    quickCheckErr 100 $ forAll (vector 3 :: Gen [Word8]) $ \ l@[a,b,c] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c))
-    quickCheck $ forAll (vector 4 :: Gen [Word8]) $ \ l@[a,b,c,d] ->
+    quickCheckErr 100 $ forAll (vector 4 :: Gen [Word8]) $ \ l@[a,b,c,d] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d))
-    quickCheck $ forAll (vector 5 :: Gen [Word8]) $ \ l@[a,b,c,d,e] ->
+    quickCheckErr 100 $ forAll (vector 5 :: Gen [Word8]) $ \ l@[a,b,c,d,e] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e))
-    quickCheck $ forAll (vector 6 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f] ->
+    quickCheckErr 100 $ forAll (vector 6 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e,f))
-    quickCheck $ forAll (vector 7 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f,g] ->
+    quickCheckErr 100 $ forAll (vector 7 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f,g] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e,f,g))
-    quickCheck $ forAll (vector 8 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f,g,h] ->
+    quickCheckErr 100 $ forAll (vector 8 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f,g,h] ->
           hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e,f,g,h))
 
     -- TODO more of these here; this should be fine for now though, as all the
@@ -412,8 +412,13 @@ test str io = do
     io
     putStrLn " OK"
 
-quickCheck1000 :: Testable prop => prop -> IO ()
-quickCheck1000 = quickCheckWith stdArgs{ maxSuccess = 1000 } -- , chatty = False }
+quickCheckErr :: Testable prop => Int -> prop -> IO ()
+quickCheckErr n p = 
+    quickCheckWithResult stdArgs{ maxSuccess = n } p
+      >>= maybeErr
+
+  where maybeErr (Success _ _ _) = return ()
+        maybeErr e = error $ show e
 
 packByteArray :: [Word8] -> P.ByteArray
 {-# NOINLINE packByteArray #-}

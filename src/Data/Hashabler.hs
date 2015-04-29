@@ -1111,26 +1111,34 @@ hashByteArray h !lenBytes ba =
         !bytesIx = lenBytes-bytesRem
         !ixFinal = lenBytes-1
         -- bytesIx in elements of Word32:
-        !w32BytesIx = bytesIx `unsafeShiftR` 2
+        !bytesIxWd = bytesIx `unsafeShiftR`
+#                       if WORD_SIZE_IN_BITS == 32
+                          2  -- `div` 4
+#                       else
+                          3  -- `div` 8
+#                       endif
 
-        -- Index `ix` in terms of elements of Word32:
+        -- Index `ix` in terms of elements of Word32 or Word64, depending on
+        -- WORD_SIZE_IN_BITS
         hash8ByteLoop !hAcc !ix 
-            | ix == w32BytesIx = hashRemainingBytes hAcc bytesIx
-            | otherwise     = assert (ix < w32BytesIx) $
+            | ix == bytesIxWd = hashRemainingBytes hAcc bytesIx
+            | otherwise     = assert (ix < bytesIxWd) $
 #                 if WORD_SIZE_IN_BITS == 32
                     let w0Dirty = P.indexByteArray ba ix
                         w1Dirty = P.indexByteArray ba (ix+1)
                         (w0,w1) = if littleEndian
                                    then (byteSwap32 w0Dirty, byteSwap32 w1Dirty)
                                    else (w0Dirty,w1Dirty)
+                        incr = 2 -- x Word32
 #                 else
                     let w64Dirty = P.indexByteArray ba ix
                         w64 = if littleEndian
                                 then byteSwap64 w64Dirty
                                 else w64Dirty
                         (w0,w1) = words32 w64
+                        incr = 1 -- x Word64
 #                 endif
-                     in hash8ByteLoop (hAcc `mix32` w0 `mix32` w1) (ix + 2)
+                     in hash8ByteLoop (hAcc `mix32` w0 `mix32` w1) (ix + incr)
         
         -- TODO we could unroll this for [0..7]
         hashRemainingBytes !hAcc !ix 

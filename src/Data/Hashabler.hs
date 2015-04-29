@@ -3,20 +3,21 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash , UnliftedFFITypes #-}
 module Data.Hashabler (
-{- | The core of this library consists of 
+{- | 
+  The core of this library consists of 
      
-     - the 'Hashable' class which defines how hashable chunks of bytes are
-       delivered to a hash function; new instances can be defined to support
-       the hashing of new datatypes using an existing algorithm
+  - the 'Hashable' class which defines how hashable chunks of bytes are
+    delivered to a hash function; new instances can be defined to support
+    the hashing of new datatypes using an existing algorithm
 
-     - the 'Hash' class which implements a particular hashing algorithm,
-       consuming bytes delivered in 'hash'; new instances can be defined to
-       support hashing 'Hashable' types with a new algorithm.
+  - the 'Hash' class which implements a particular hashing algorithm,
+    consuming bytes delivered in 'hash'; new instances can be defined to
+    support hashing existing 'Hashable' types with a new algorithm.
 
-  Currently we implement only the 32 and 64-bit variations of the FNV-1a
-  non-cryptographic hashing algorithm ('hashFNV32' and 'hashFNV64'), which have
-  good hashing properties and are easy to implement in different languages and
-  on different platforms.
+  Currently we implement only the 32 and 64-bit variations of the 
+  <http://www.isthe.com/chongo/tech/comp/fnv/ FNV-1a non-cryptographic hashing algorithm> 
+  ('hashFNV32' and 'hashFNV64'), which have good hashing properties and are
+  easy to implement in different languages and on different platforms.
 
   Please see the project description for more information.
  -}
@@ -41,56 +42,58 @@ module Data.Hashabler (
 
   -- * Creating Hash and Hashable instances
   , mixConstructor
-  -- ** Defining principled Hashable instances #principled#
+  -- ** Defining principled Hashable instances
 {- | 
+ #principled#
+
  Special care needs to be taken when defining instances of Hashable for your
  own types, especially for recursive types and types with multiple
- constructors. First instances need to ensure that *distinct values produce
- distinct hash values*. Here's an example of a *bad* implementation for 'Maybe':
- .
+ constructors. First instances need to ensure that /distinct values produce
+ distinct hash values/. Here's an example of a /bad/ implementation for 'Maybe':
+ 
  > instance (Hashable a)=> Hashable (Maybe a) where              -- BAD!
  >     hash h (Just a) = h `hash` a          -- BAD!
  >     hash h Nothing  = h `hash` (1::Word8) -- BAD!
- .
+
  Here @Just (1::Word8)@ hashes to the same value as @Nothing@.
- .
+
  Second and more tricky, instances should not permit a function 
  @f :: a -> (a,a)@ such that 
  @x `hash` y == x `hash` y1 `hash` y2 where (y1,y2) = f y@... or something.
  The idea is we want to avoid the following kinds of collisions:
- .
+
  > hash [Just 1, Nothing] == hash [Just 1]     -- BAD!
  > hash ([1,2], [3])      == hash ([1], [2,3]  -- BAD!)
- .
+
  Maybe what we mean is that where @a@ is a 'Monoid', we expect replacing
- `mappend` with the hash operation to always yield *different* values. This
+ `mappend` with the hash operation to always yield /different/ values. This
  needs clarifying; please help.
- .
+
  Here are a few rules of thumb which should result in principled instances for
  your own types (This is a work-in-progress; please help):
- .
+
  - If all values of a type have a static structure, i.e. the arrangement and
    number of child parts to be hashed is knowable from the type, then one may
    simply hash each child element of the type in turn. This is the case for
    product types like tuples (where the arity is reflected in the type), or
    primitive numeric values composed of a static number of bits.
- . 
+
  Otherwise if the type has variable structure, e.g. if it has multiple
  constructors or is an array type...
- .
+
  - Every possible value of a type should inject at least one byte of entropy
-   *apart* from any recursive calls to child elements; we can ensure this is
+   /apart/ from any recursive calls to child elements; we can ensure this is
    the case by hashing an initial or final distinct byte for each distinct
    constructor of our type
- .
+
  To ensure hashing remains consistent across platforms, instances should not
- compile-time-conditionally call different @mix*@-family 'Hash' functions.
+ compile-time-conditionally call different @mix@-family 'Hash' functions.
  This rule doesn't matter for instances like 'FNV32' which mix in data one byte
  at a time, but other 'Hash' instances may operate on multiple bytes at a time,
  perhaps using padding bytes, so this becomes important.
- .
+
  A final important note: we're not concerned with collisions between values of
- *different types*; in fact in many cases "equivalent" values of different
+ /different types/; in fact in many cases "equivalent" values of different
  types intentionally hash to the same value. This also means instances cannot
  rely on the hashing of child elements being uncorrelated. That might be one
  interpretation of the mistake in our faulty @Maybe@ instance above
@@ -395,7 +398,7 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 -- We try to ensure that bytes are extracted from values in a way that is
 -- portable across architectures (where possible), and straightforward to
 -- replicate on other platforms and in other languages. Exceptions are
--- *NOTE*-ed in instance docs.
+-- __NOTE__-ed in instance docs.
 --
 -- See the section <#principled "Defining Hashable instances"> for details of what we expect
 -- from instances.
@@ -446,7 +449,9 @@ class (Eq h)=> Hash h where
 
 -- FNV HASH KERNELS -------------------------------------------------
 
--- | > (FNV32 h32) `mix8` b = FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
+-- | @
+-- 'mix8' ('FNV32' h32) b = 'FNV32' $ (h32 ``xor`` fromIntegral b) * 'fnvPrime32'
+-- @
 instance Hash FNV32 where
     {-# INLINE mix8 #-}
     mix8 (FNV32 h32) = \b-> FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
@@ -465,7 +470,9 @@ hashFNV32 :: Hashable a=> a -> FNV32
 hashFNV32 = hash fnvOffsetBasis32
 
 
--- | > (FNV64 h64) `mix8` b = FNV64 $ (h64 `xor` fromIntegral b) * fnvPrime64
+-- | @
+-- 'mix8' ('FNV64' h64) b = 'FNV64' $ (h64 ``xor`` fromIntegral b) * 'fnvPrime64'
+-- @
 instance Hash FNV64 where
     {-# INLINE mix8 #-}
     mix8 (FNV64 h64) = \b-> FNV64 $ (h64 `xor` fromIntegral b) * fnvPrime64
@@ -718,7 +725,7 @@ instance Hashable Void where
 #endif
 
 
--- | Hash in numerator, then denominator.
+-- | > hash s a = s `hash` numerator a `hash` denominator a
 instance (Integral a, Hashable a) => Hashable (Ratio a) where
     {-# INLINE hash #-}
     hash s a = s `hash` numerator a `hash` denominator a
@@ -727,7 +734,7 @@ instance (Integral a, Hashable a) => Hashable (Ratio a) where
 -- ---------
 -- Architecture-dependent types, with special handling.
 
--- | *NOTE*: @Int@ has platform-dependent size. When hashing on 64-bit machines
+-- | __NOTE__: @Int@ has platform-dependent size. When hashing on 64-bit machines
 -- if the @Int@ value to be hashed falls in the 32-bit Int range, we first cast
 -- it to an Int32. This should help ensure that programs that are correct
 -- across architectures will also produce the same hash values.
@@ -740,7 +747,7 @@ instance Hashable Int where
         _hash32_Int_64 h (fromIntegral i)
 #     endif
 
--- | *NOTE*: @Word@ has platform-dependent size. When hashing on 64-bit
+-- | __NOTE__: @Word@ has platform-dependent size. When hashing on 64-bit
 -- machines if the @Word@ value to be hashed falls in the 32-bit Word range, we
 -- first cast it to a Word32. This should help ensure that programs that are
 -- correct across architectures will also produce the same hash values.
@@ -837,8 +844,9 @@ instance Hashable Word64 where
 -- Since below have variable-length, we'll use this helper (which is also
 -- useful for multi-constructor types):
 
+-- > mixConstructor n h = h `mix8` (0xFF - n)
 mixConstructor :: (Hash h)
-               => Word8  -- ^ Constructor number. Recommend starting from 0 and incrementing.
+               => Word8  -- ^ Constructor number. We recommend starting from 0 and incrementing.
                -> h      -- ^ Hash value to mix our byte into
                -> h      -- ^ New hash value
 {-# INLINE mixConstructor #-}
@@ -858,7 +866,7 @@ instance Hashable BL.ByteString where
         BL.foldlChunks hashBytesUnrolled64 h
 
 #if MIN_VERSION_bytestring(0,10,4)
--- | NOTE: hidden on bytestring < v0.10.4
+-- | Exposed only in bytestring >= v0.10.4
 instance Hashable BSh.ShortByteString where
     {-# INLINE hash #-}
     hash h  = 
@@ -916,13 +924,13 @@ instance Hashable Char where
               hi = fromIntegral $ (m .&. 0x3FF) + 0xDC00
 
 
--- | *NOTE*: no promise of consistency across runs or platforms.
+-- | __NOTE__: no promise of consistency across runs or platforms.
 instance Hashable ThreadId where
     {-# INLINE hash #-}
     hash h = \(ThreadId tid)-> 
         hash h (fromIntegral $ getThreadId tid :: Word)
 
--- | *NOTE*: no promise of consistency across platforms or GHC versions.
+-- | __NOTE__: no promise of consistency across platforms or GHC versions.
 instance Hashable TypeRep where
     {-# INLINE hash #-}
     hash h = hash h . typeRepInt32
@@ -940,7 +948,7 @@ typeRepInt32 =
 # endif
 
 
--- | *NOTE*: No promise of stability across runs or platforms. Implemented via
+-- | __NOTE__: No promise of stability across runs or platforms. Implemented via
 -- 'hashStableName'.
 instance Hashable (StableName a) where
     {-# INLINE hash #-}

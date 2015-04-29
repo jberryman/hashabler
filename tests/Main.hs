@@ -12,6 +12,8 @@ import qualified Data.Text.Encoding as T
 import qualified Data.Text.Internal as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.ByteString.Char8 as C
+import qualified Data.Primitive as P
+
 import Vectors.FNV
 
 import Foreign.Marshal.Utils (fromBool)
@@ -33,6 +35,7 @@ import Test.QuickCheck
 import GHC.Natural (Natural)
 #endif
 
+import System.IO.Unsafe(unsafeDupablePerformIO)
 import Prelude
 
 
@@ -59,8 +62,8 @@ main = do
 testsMain :: IO ()
 testsMain = do
     checkMiscUnitTests
-    checkVectors
     checkHashableInstances
+    checkVectors
 
 checkVectors :: IO ()
 checkVectors = do
@@ -246,6 +249,17 @@ checkHashableInstances = do
         flip forAll checkBS $ do
             let maxBytes = 1000*1000
             growingElements [1..maxBytes]
+
+    -- Check that P.ByteArrays hash like [Word8]
+    quickCheck $ do
+        let checkBA bs = 
+              let wd8s = take bs $ iterate (+1) 0
+                  byteArr = packByteArray wd8s
+               in (hashFNV32 byteArr) ==
+                  (hashFNV32 wd8s)
+        flip forAll checkBA $ do
+            let maxBytes = 1000*1000
+            growingElements [1..maxBytes]
     
     -- Check that ByteStrings hash like [Word8], after some arbitrary
     -- equivalent transformations (we mainly want to exercise handling of the
@@ -400,3 +414,10 @@ test str io = do
 
 quickCheck1000 :: Testable prop => prop -> IO ()
 quickCheck1000 = quickCheckWith stdArgs{ maxSuccess = 1000 } -- , chatty = False }
+
+packByteArray :: [Word8] -> P.ByteArray
+{-# NOINLINE packByteArray #-}
+packByteArray byts = unsafeDupablePerformIO $ do
+     aMut <- P.newByteArray (length byts)
+     forM_ (zip [0..] byts) $ \(ix,byt)-> P.writeByteArray aMut ix byt
+     P.unsafeFreezeByteArray aMut

@@ -1,5 +1,5 @@
 name:                hashabler
-version:             0.1.0.1
+version:             0.1.0.2
 synopsis:            Principled, cross-platform & extensible hashing of types, including an implementation of the FNV-1a algorithm.
 description:         
     This package is a rewrite of the @hashable@ library by Milan Straka and
@@ -51,7 +51,7 @@ Flag integer-gmp
   Default: True
 
 Flag dev
-  Description: Build the tests and benchmark suites?
+  Description: To build tests, executables and benchmarks do `configure -fdev --enable-tests` and run the built executables by hand.
   Default: False
 
 library
@@ -83,7 +83,8 @@ library
 
 -- I'm not sure how to make this test-suite and still be able to get
 -- conditional export list in library:
-Executable tests
+test-suite tests
+  type: exitcode-stdio-1.0
   default-language:    Haskell2010
   hs-source-dirs:      tests
   main-is:             Main.hs
@@ -107,7 +108,8 @@ Executable tests
       buildable: False
 
 
-Executable bench
+test-suite bench
+  type: exitcode-stdio-1.0
   default-language:    Haskell2010
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
@@ -129,7 +131,8 @@ Executable bench
 
 
 -- Some code to visualize distributions of hashes.
-Executable viz
+test-suite viz
+  type: exitcode-stdio-1.0
   default-language:    Haskell2010
   main-is:             Main.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
@@ -157,7 +160,8 @@ source-repository head
 
 
 
-Executable core
+test-suite core
+  type: exitcode-stdio-1.0
  -- find dist/build/core/core-tmp -name '*dump-simpl'
   if flag(dev)
       buildable: True

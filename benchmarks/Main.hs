@@ -89,6 +89,7 @@ main = do
       , bench "[Text], hashable" $  nf Their.hash allWordsListText
       , bench "long Text, hashabler" $ nf (fnv32 . hashFNV32) allWordsText
       , bench "[Text], hashabler" $  nf (fnv32 . hashFNV32) allWordsListText
+      -- TODO ByteString
       ],
      bgroup "dev" [
         -- We can more or less subtract this from benchmarks producing a Word32 hash:

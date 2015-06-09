@@ -21,6 +21,7 @@ module Data.Hashabler (
 
   Please see the project description for more information.
  -}
+  -- * The Hashable and Hash classes
     Hashable(..)
   , Hash(..)
   -- * Hashing with the FNV-1a algorithm
@@ -355,6 +356,7 @@ _bytes64_32 wd =
         (b4,b5,b6,b7) = bytes32 wd1
      in (b0,b1,b2,b3,b4,b5,b6,b7)
 
+-- TODO can this be done more efficiently on 32-bit machines?
 words32 :: Word64 -> (Word32, Word32)
 {-# INLINE words32 #-}
 words32 wd64 = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
@@ -411,6 +413,15 @@ class Hashable a where
     -- algorithm, or might comprise the core of a hashing algorithm (perhaps
     -- with some final mixing), or might do something completely apart from
     -- hashing (e.g. simply cons bytes into a list for debugging).
+    --
+    -- Implementations must ensure that, for the same data: 
+    --    
+    --    - @Word16/32/64@ arguments passed into the methods of 'Hash', and... 
+    --
+    --    - the choice of @mix@ function itself...
+    --
+    -- ...are consistent across architectures of different word size and
+    -- endianness.
     hash :: (Hash h)=> h -> a -> h
 
 
@@ -423,18 +434,23 @@ class Hashable a where
 -- @mix@-ing in larger word chunks for performance reasons. For instance a hash
 -- function which operates on four bytes at a time might make use of 'mix32',
 -- and perhaps in 'mix8' pad with three additional 0s.
+--
+-- Endianness issues are handled in 'Hashable' instances.
 class (Eq h)=> Hash h where
     -- | Hash in one byte.
     mix8 :: h -> Word8 -> h
-    -- | Hash in a 2-byte word. Defaults to 'mix8' on bytes from most to least significant.
+    -- | Hash in a 2-byte word. Defaults to two 'mix8' on bytes from most to
+    -- least significant.
     mix16 :: h -> Word16 -> h
-    -- | Hash in a 4-byte word. Defaults to 'mix8' on bytes from most to least significant.
+    -- | Hash in a 4-byte word. Defaults to four 'mix8' on bytes from most to
+    -- least significant.
     mix32 :: h -> Word32 -> h
-    -- | Hash in an architecture-dependent word. Defaults to 'mix8' on bytes
-    -- from most to least significant. If you override the default
-    -- implementation, you should ensure 'hash' produces the same values on all
-    -- architectures.
-    --
+    -- | Hash in a 8-byte word. Defaults to two 'mix32' on 32-byte words from
+    -- most to least significant.
+    mix64 :: h -> Word64 -> h
+
+    -- Hash functions are likely to take individually bytes, or chunks of 32 or
+    -- 64 bits, so I think these defaults make sense.
     {-# INLINE mix16 #-}
     mix16 h = \wd16-> 
        let (wd8_0,wd8_1) = bytes16 wd16
@@ -444,6 +460,11 @@ class (Eq h)=> Hash h where
     mix32 h = \wd32->
        let (b0,b1,b2,b3) = bytes32 wd32
         in h `mix8` b0 `mix8` b1 `mix8` b2 `mix8` b3 
+
+    {-# INLINE mix64 #-}
+    mix64 h = \wd64->
+       let (w32_0, w32_1) = words32 wd64
+        in h `mix32` w32_0 `mix32` w32_1
 
 
 
@@ -856,14 +877,14 @@ mixConstructor n = \h-> h `mix8` (0xFF - n)
 instance Hashable B.ByteString where
     {-# INLINE hash #-}
     hash h = mixConstructor 0 .
-        hashBytesUnrolled64 h
+        hashByteString h
 
 -- TODO benchmarks for fusion:
 -- | Lazy @ByteString@
 instance Hashable BL.ByteString where
     {-# INLINE hash #-}
     hash h = mixConstructor 0 .
-        BL.foldlChunks hashBytesUnrolled64 h
+        BL.foldlChunks hashByteString h
 
 #if MIN_VERSION_bytestring(0,10,4)
 -- | Exposed only in bytestring >= v0.10.4
@@ -1043,9 +1064,9 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 
 
 -- This is about twice as fast as a loop with single byte peeks:
-hashBytesUnrolled64 :: (Hash h)=> h -> B.ByteString -> h
-{-# INLINE hashBytesUnrolled64 #-}
-hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
+hashByteString :: (Hash h)=> h -> B.ByteString -> h
+{-# INLINE hashByteString #-}
+hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
       withForeignPtr fp $ \base ->
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
             -- index where we begin to read (bytesRem < 8) individual bytes:
@@ -1055,22 +1076,14 @@ hashBytesUnrolled64 h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
-#                 if WORD_SIZE_IN_BITS == 32
-                    w0Dirty <- peekByteOff base ix
-                    w1Dirty <- peekByteOff base (ix+4)
-                    let (w0,w1) = if littleEndian
-                                   then (byteSwap32 w0Dirty, byteSwap32 w1Dirty)
-                                   else (w0Dirty,w1Dirty)
-#                 else
                     w64Dirty <- peekByteOff base ix
                     let w64 = if littleEndian
                                 then byteSwap64 w64Dirty
                                 else w64Dirty
-                        (w0,w1) = words32 w64
-#                 endif
-                    hash8ByteLoop (hAcc `mix32` w0 `mix32` w1) (ix + 8)
+
+                    hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
             
-            -- TODO we could unroll this for [0..7]
+            -- TODO we could unroll this for [0..7], and/or call mix16 and mix32
             hashRemainingBytes !hAcc !ix 
                 | ix > ixFinal  = return hAcc 
                 | otherwise     = assert (ix <= ixFinal) $ do
@@ -1119,36 +1132,21 @@ hashByteArray h !lenBytes ba =
         !bytesIx = lenBytes-bytesRem
         !ixFinal = lenBytes-1
         -- bytesIx in elements of Word32:
-        !bytesIxWd = bytesIx `unsafeShiftR`
-#                       if WORD_SIZE_IN_BITS == 32
-                          2  -- `div` 4
-#                       else
-                          3  -- `div` 8
-#                       endif
+        !bytesIxWd = bytesIx `unsafeShiftR` 3  -- `div` 8
 
         -- Index `ix` in terms of elements of Word32 or Word64, depending on
         -- WORD_SIZE_IN_BITS
         hash8ByteLoop !hAcc !ix 
             | ix == bytesIxWd = hashRemainingBytes hAcc bytesIx
             | otherwise     = assert (ix < bytesIxWd) $
-#                 if WORD_SIZE_IN_BITS == 32
-                    let w0Dirty = P.indexByteArray ba ix
-                        w1Dirty = P.indexByteArray ba (ix+1)
-                        (w0,w1) = if littleEndian
-                                   then (byteSwap32 w0Dirty, byteSwap32 w1Dirty)
-                                   else (w0Dirty,w1Dirty)
-                        incr = 2 -- x Word32
-#                 else
                     let w64Dirty = P.indexByteArray ba ix
                         w64 = if littleEndian
                                 then byteSwap64 w64Dirty
                                 else w64Dirty
-                        (w0,w1) = words32 w64
-                        incr = 1 -- x Word64
-#                 endif
-                     in hash8ByteLoop (hAcc `mix32` w0 `mix32` w1) (ix + incr)
+
+                     in hash8ByteLoop (hAcc `mix64` w64) (ix + 1)
         
-        -- TODO we could unroll this for [0..7]
+        -- TODO we could unroll this for [0..7], and/or call mix16 and mix32
         hashRemainingBytes !hAcc !ix 
             | ix > ixFinal  = hAcc 
             | otherwise     = assert (ix <= ixFinal) $

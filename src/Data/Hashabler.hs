@@ -21,6 +21,7 @@ module Data.Hashabler (
   -- * The Hashable and Hash classes
     Hashable(..)
   , Hash(..)
+
   -- * Hashing with the FNV-1a algorithm
   , FNV32(..)
   , hashFNV32
@@ -37,6 +38,10 @@ module Data.Hashabler (
   -- fine passed to 'hash':
   , fnvOffsetBasis32
   , fnvOffsetBasis64
+  
+  -- * Hashing with the SipHash algorithm
+  -- TODO
+  , siphash
 
   -- * Creating Hash and Hashable instances
   , mixConstructor
@@ -103,6 +108,9 @@ module Data.Hashabler (
   -- * Internal functions exposed for testing; you shouldn't see these
   , hashFoldl'
   , hashLeftUnfolded
+  -- So that we can omit the mixConstructor, and use test vectors provided by
+  -- SipHash directly:
+  , hashByteString
   , bytesFloat, bytesDouble
   , magnitudeAsWord
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
@@ -111,3 +119,4 @@ module Data.Hashabler (
     ) where
 
 import Data.Hashabler.Internal
+import Data.Hashabler.SipHash

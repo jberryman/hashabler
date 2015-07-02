@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
-{-# LANGUAGE RecordWildCards, BangPatterns #-}
+{-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
 module Data.Hashabler.SipHash
     where
 
@@ -17,6 +17,18 @@ import Control.Exception(assert)
 
 import Data.Hashabler.Internal
 
+
+#ifdef EXPORT_INTERNALS
+-- Our implementation of 'hash' for ByteString (and all variable-length types)
+-- calls `mixConstructor` after hashing all bytes. We do an ugly hack here
+-- where when testing we specialize siphash to operate on ByteString, and use
+-- hashByteString directly so that we avoid the final mixConstructor and can
+-- use the test vectors from the siphash reference implementation directly.
+-- TODO once we bootstrap our implementation we can generate our own vectors
+-- and then ditch this hack.
+import Data.ByteString
+#endif
+
 {- Hard-coded for now. TODO later make configurable if desired
 -- /* default: SipHash-2-4 */
 -- #define cROUNDS 2
@@ -30,47 +42,7 @@ dROUNDS = 4
 rotl :: Word64 -> Int -> Word64
 rotl x b = (x `unsafeShiftL` b) .|. (x `unsafeShiftR` (64 - b))
 
--- #define U32TO8_LE(p, v)                                         \
---   (p)[0] = (uint8_t)((v)      ); (p)[1] = (uint8_t)((v) >>  8); \
---   (p)[2] = (uint8_t)((v) >> 16); (p)[3] = (uint8_t)((v) >> 24);
 
--- #define U64TO8_LE(p, v)                        \
---   U32TO8_LE((p),     (uint32_t)((v)      ));   \
---   U32TO8_LE((p) + 4, (uint32_t)((v) >> 32));
-
--- Here we're doing another byteswap before writing to a byte array. We can
--- omit that since we'll just produce a Word64
-u64To8 = undefined
-
-{- NOTE: no need for this; Hashabler instance will supply bytes "in order"
--- #define U8TO64_LE(p)            \
---   (((uint64_t)((p)[0])      ) | \
---    ((uint64_t)((p)[1]) <<  8) | \
---    ((uint64_t)((p)[2]) << 16) | \
---    ((uint64_t)((p)[3]) << 24) | \
---    ((uint64_t)((p)[4]) << 32) | \
---    ((uint64_t)((p)[5]) << 40) | \
---    ((uint64_t)((p)[6]) << 48) | \
---    ((uint64_t)((p)[7]) << 56))
--- Reads a Word64 and reverses if little endian
--- TODO a test for little endian on 32-bit, make sure it behaves the same
--- TODO make this a utility and use elsewhere:
--- NOTE: this is a pointer to a Word64, instead of a byte, so we'll need to + 1, not + 8
-u8To64 :: Ptr Word64 -> IO Word64
-u8To64 ptr = do
-    w64Dirty <- peekByteOff base ix
-    return $! if littleEndian
-                then byteSwap64 w64Dirty
-                else w64Dirty
--}
-
--- #define SIPROUND                                        \
---   do {                                                  \
---     v0 += v1; v1=ROTL(v1,13); v1 ^= v0; v0=ROTL(v0,32); \
---     v2 += v3; v3=ROTL(v3,16); v3 ^= v2;                 \
---     v0 += v3; v3=ROTL(v3,21); v3 ^= v0;                 \
---     v2 += v1; v1=ROTL(v1,17); v1 ^= v2; v2=ROTL(v2,32); \
---   } while(0)
 sipRound :: Word64 -> Word64 -> Word64 -> Word64 -> (Word64, Word64, Word64, Word64)
 {-# INLINE sipRound #-}
 sipRound v0 v1 v2 v3 = runIdentity $ do
@@ -86,6 +58,7 @@ sipRound v0 v1 v2 v3 = runIdentity $ do
     v0 <- return $ v0 + v3
     v3 <- return $ rotl v3 21
     v3 <- return $ v3 `xor` v0
+
     v2 <- return $ v2 + v1
     v1 <- return $ rotl v1 17
     v1 <- return $ v1 `xor` v2
@@ -94,21 +67,6 @@ sipRound v0 v1 v2 v3 = runIdentity $ do
 
 
 
--- int  siphash( uint8_t *out, const uint8_t *in, uint64_t inlen, const uint8_t *k )
--- {
---   /* "somepseudorandomlygeneratedbytes" */
---   uint64_t v0 = 0x736f6d6570736575ULL;
---   uint64_t v1 = 0x646f72616e646f6dULL;
---   uint64_t v2 = 0x6c7967656e657261ULL;
---   uint64_t v3 = 0x7465646279746573ULL;
---   uint64_t b;
-{-
-Extract the two 64-bit portions of the keys:
--}
---   uint64_t k0 = U8TO64_LE( k );
---   uint64_t k1 = U8TO64_LE( k + 8 );
---   uint64_t m;
---   int i;
 type SipKey = (Word64,Word64)
 data SipState = SipState {
                     v0 :: !Word64
@@ -119,7 +77,7 @@ data SipState = SipState {
                   -- shift m left just enough to accomodate them.
                   , mPart  :: !Word64
                   , bytesRemaining :: !Int  -- ^ bytes remaining for a full 'm'
-                  , accumulatedLength :: !Word64
+                  , inlen :: !Word64  -- ^ we'll accumulate this as we consume
                   } deriving Eq
 
 -- Corresponds to for loop:
@@ -140,7 +98,7 @@ instance Hash SipState where
                     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
 
                     v0 <- return $ v0 `xor` m
-                    accumulatedLength <- return $ accumulatedLength + 8
+                    inlen <- return $ inlen + 8
                     return $ SipState{ .. }
                     
              _ -> undefined -- TODO
@@ -152,7 +110,14 @@ instance Hash SipState where
                     ( we don't have to worry about this messing with the spec since our only leftovers should be the final bytes.)
                     -}
 
-siphash :: Hashable a=> a -> SipKey -> Word64
+siphash :: 
+#     ifdef EXPORT_INTERNALS
+        -- specialized for testing. See note in imports.
+        ByteString  -- ^ TESTING
+#     else
+        Hashable a=> a 
+#     endif
+        -> SipKey -> Word64
 siphash a (k0,k1) = runIdentity $ do
     let v0 = 0x736f6d6570736575
         v1 = 0x646f72616e646f6d
@@ -167,11 +132,6 @@ Bytes remaining after 64 bit chunks:
 'left' pushed all the way left:
 --   b = ( ( uint64_t )inlen ) << 56;
 -}
-
---   v3 ^= k1;
---   v2 ^= k0;
---   v1 ^= k1;
---   v0 ^= k0;
     v3 <- return $ v3 `xor` k1;
     v2 <- return $ v2 `xor` k0;
     v1 <- return $ v1 `xor` k1;
@@ -182,20 +142,18 @@ Bytes remaining after 64 bit chunks:
 --   v1 ^= 0xee;
 -- #endif
 
-{-
-Process all 64-bit chunks (n.b. no use of b or inlen at this point (except for
-pointer arithmetic)):
--}
---   for ( ; in != end; in += 8 )
---   {
---     m = U8TO64_LE( in );
---     v3 ^= m;
-
---     for( i=0; i<cROUNDS; ++i ) SIPROUND;
-
---     v0 ^= m;
---   }
-    SipState{ .. } <- return $ hash (SipState v0 v1 v2 v3 0 8 0) a
+    -- Initialize rest of SipState:
+    let mPart = 0
+        bytesRemaining = 8
+        inlen = 0
+    SipState{ .. } <- return $ 
+#     ifdef EXPORT_INTERNALS
+        -- specialized for testing. See note in imports.
+        hashByteString
+#     else
+        hash 
+#     endif
+          (SipState { .. }) a
 
 
 {- TODO
@@ -214,13 +172,7 @@ This is folding in remaining bytes, but I don't totally understand this:
 --   }
 -}
 
-{-
-Do some final mixing
---   v3 ^= b;
---   for( i=0; i<cROUNDS; ++i ) SIPROUND;
---   v0 ^= b;
--}
-    let !b = accumulatedLength `unsafeShiftL` 56
+    let !b = inlen `unsafeShiftL` 56
     -- TODO OR remaining bytes into `b` as per above
 
     v3 <- return $ v3 `xor` b
@@ -230,14 +182,14 @@ Do some final mixing
     v0 <- return $ v0 `xor` b
 
 {-
-0xff may be "Any non-zero value":
 -- #ifndef DOUBLE
 --   v2 ^= 0xff;
 -- #else
 --   v2 ^= 0xee;  -- TODO
 -- #endif
 -}
-    v2 <- return $ v2 `xor` 0xFF
+    -- 0xff may be "Any non-zero value":
+    v2 <- return $ v2 `xor` 0xff
 
 --   for( i=0; i<dROUNDS; ++i ) SIPROUND;
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
@@ -245,9 +197,7 @@ Do some final mixing
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
 
---   b = v0 ^ v1 ^ v2  ^ v3;
---   U64TO8_LE( out, b );
-    return $ v0 `xor` v1 `xor` v2 `xor` v3
+    return $! v0 `xor` v1 `xor` v2 `xor` v3
 
 {- TODO
 -- #ifdef DOUBLE

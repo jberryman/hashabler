@@ -63,7 +63,7 @@ library
       CPP-Options:     -DEXPORT_INTERNALS
 
   exposed-modules:     Data.Hashabler
-  other-modules:       MachDeps
+  other-modules:       MachDeps, Data.Hashabler.Internal, Data.Hashabler.SipHash
   -- other-extensions:    
                        -- GHC 7.2.1:
   build-depends:       base >=4.4 && <5

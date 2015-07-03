@@ -1,13 +1,17 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
-module Data.Hashabler.SipHash
-    where
+module Data.Hashabler.SipHash (
+    siphash
+  ) where
 
 -- We use the identity monad for non-recursive binding and utilize name
 -- shadowing and RecordWildcards so we can easily translate the implicitly
 -- stateful siphash reference implementation here:
 --
 -- https://github.com/veorq/SipHash/blob/master/siphash24.c
+--  
+--  TODO after we implement tests, play a bit with tweaking algorithm (e.g. order of independent operations)
+--       look at core
 
 -- TODO need to depend on mtl or transformers for base < 4.8
 import Data.Functor.Identity
@@ -40,6 +44,7 @@ dROUNDS = 4
 
 -- #define ROTL(x,b) (uint64_t)( ((x) << (b)) | ( (x) >> (64 - (b))) )
 rotl :: Word64 -> Int -> Word64
+{-# INLINE rotl #-}
 rotl x b = (x `unsafeShiftL` b) .|. (x `unsafeShiftR` (64 - b))
 
 
@@ -110,15 +115,17 @@ instance Hash SipState where
                     ( we don't have to worry about this messing with the spec since our only leftovers should be the final bytes.)
                     -}
 
-siphash :: 
-#     ifdef EXPORT_INTERNALS
-        -- specialized for testing. See note in imports.
-        ByteString  -- ^ TESTING
-#     else
-        Hashable a=> a 
-#     endif
-        -> SipKey -> Word64
-siphash a (k0,k1) = runIdentity $ do
+# ifdef EXPORT_INTERNALS
+-- | USERS SHOULD NOT SEE THIS SIGNATURE
+-- specialized for testing. See note in imports.
+siphash :: SipKey -> ByteString -> Word64
+# else
+
+-- | TODO docs
+siphash :: Hashable a => SipKey -> a -> Word64
+# endif
+{-# INLINE siphash #-}
+siphash (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
         v1 = 0x646f72616e646f6d
         v2 = 0x6c7967656e657261

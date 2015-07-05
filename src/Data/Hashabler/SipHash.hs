@@ -81,39 +81,95 @@ data SipState = SipState {
                   -- when (number of bytes <= bytesRemaining) bytes come in, we
                   -- shift m left just enough to accomodate them.
                   , mPart  :: !Word64
-                  , bytesRemaining :: !Int  -- ^ bytes remaining for a full 'm'
+                  , bytesRemaining :: !Word64  -- ^ bytes remaining for a full 'm'
                   , inlen :: !Word64  -- ^ we'll accumulate this as we consume
                   } deriving Eq
 
--- Corresponds to for loop:
---   for ( ; in != end; in += 8 )
 instance Hash SipState where
-    mix8 SipState{ .. } =  assert (bytesRemaining > 0 && bytesRemaining <= 8) $
-        undefined -- TODO
-    mix16 SipState{ .. } = assert (bytesRemaining > 0 && bytesRemaining <= 8) $
-        undefined -- TODO
-    mix32 SipState{ .. } = assert (bytesRemaining > 0 && bytesRemaining <= 8) $
-        undefined -- TODO
-    mix64 SipState{ .. } m = assert (bytesRemaining > 0 && bytesRemaining <= 8) $
-        case bytesRemaining of
-             8 -> runIdentity $ do
-                    v3 <- return $ v3 `xor` m
-                 -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
-                    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
-                    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    mix8 st m = siphashForWord st m
+    mix16 st m = siphashForWord st m
+    mix32 st m = siphashForWord st m
+    mix64 st m = siphashForWord st m
 
-                    v0 <- return $ v0 `xor` m
-                    inlen <- return $ inlen + 8
-                    return $ SipState{ .. }
-                    
-             _ -> undefined -- TODO
-              {-
-                  pad with zeros in anticipation of the next being 64 bits?
-                  or split?
-                  or insert a single padding byte and split (hoping that this will get us out of bad phase)
-                    (can we do this in a way that is compatible with the way we handle remaining bytes?)
-                    ( we don't have to worry about this messing with the spec since our only leftovers should be the final bytes.)
-                    -}
+
+-- Corresponds to body of loop:
+--   for ( ; in != end; in += 8 )
+-- with special handling for the way we accumulate chunks of input until it
+-- fills a Word64. For now we choose to hash in the data we've accumulated as
+-- soon as an incoming chunk won't fit into mPart, rather than splitting the
+-- incoming chunk and only hashing in "full" mparts. The issue with the latter
+-- is we don't want to get "out of phase", e.g. we start receiving 64-bit
+-- chunks while bytesRemaining == 4. 
+--   TODO play with hashing different structures and benchmark, think of some
+--   pathological inputs, experiment with splitting inputs but padding with a
+--   single byte so that we eventually can get back into phase.
+siphashForWord :: (Integral m, 
+#                  if MIN_VERSION_base(4,7,0)
+                    FiniteBits m
+#                  else
+                    Bits m
+#                  endif
+                   )=> SipState -> m -> SipState
+{-# INLINE siphashForWord #-}
+siphashForWord (SipState{ .. }) m = runIdentity $
+    case compare fill 0 of
+         -- room in mPart with room leftover
+         GT -> do mPart <- orMparts mPart m
+                  let bytesRemaining = fill
+                  inlen <- return $ inlen + mSize
+                  return $ SipState{ .. }
+         -- m will exactly fill mPart
+         EQ -> do m <- orMparts mPart m
+                  -- reset mPart:
+                  let mPart = 0
+                      bytesRemaining = 8
+                  (v0,v1,v2,v3) <- sipMix v0 v1 v2 v3 m
+                  inlen <- return $ inlen + mSize
+                  return $ SipState{ .. }
+         -- not enought room in mPart.
+         LT | mSize == 8 -> do  -- ...and m fills next Word64 too.
+                  -- first mix in our mPart (padded with zeros)
+                  (v0,v1,v2,v3) <- sipMix v0 v1 v2 v3 mPart
+                  -- ...then our m
+                  (v0,v1,v2,v3) <- sipMix v0 v1 v2 v3 (fromIntegral m)
+                  -- reset mPart:
+                  let mPart = 0
+                      bytesRemaining = 8
+                  inlen <- return $ inlen + mSize
+                  return $ SipState{ .. }
+            | otherwise -> do
+                  -- first mix in our mPart
+                  (v0,v1,v2,v3) <- sipMix v0 v1 v2 v3 mPart
+                  -- ...then pass along m as our mPart
+                  let mPart = fromIntegral m
+                      bytesRemaining = 8 - mSize
+                  inlen <- return $ inlen + mSize
+                  return $ SipState{ .. }
+  where
+    mSizeBits =
+#    if MIN_VERSION_base(4,7,0)
+      finiteBitSize m
+#    else
+      bitSize m
+#    endif
+
+    mSize = case mSizeBits of  8 -> 1 ; 16 -> 2 ; 32 -> 4 ; 64 -> 8 ; _ -> error "Impossible size!"
+
+    fill = assert (bytesRemaining > 0 && bytesRemaining <= 8) $ 
+              bytesRemaining - mSize
+
+    orMparts mPart m = return $ 
+        (mPart `unsafeShiftL` mSizeBits) .|. (fromIntegral m)
+
+    sipMix v0 v1 v2 v3 m = do
+        v3 <- return $ v3 `xor` m
+     -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
+        (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+        (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+
+        v0 <- return $ v0 `xor` m
+        return (v0,v1,v2,v3)
+
 
 # ifdef EXPORT_INTERNALS
 -- | USERS SHOULD NOT SEE THIS SIGNATURE
@@ -121,7 +177,9 @@ instance Hash SipState where
 siphash :: SipKey -> ByteString -> Word64
 # else
 
--- | TODO docs
+-- | An implementation of 64-bit siphash-2-4.
+--
+-- TODO docs
 siphash :: Hashable a => SipKey -> a -> Word64
 # endif
 {-# INLINE siphash #-}

@@ -41,7 +41,8 @@ module Data.Hashabler (
   
   -- * Hashing with the SipHash algorithm
   -- TODO
-  , siphash
+  , siphash64
+  , siphash128
 
   -- * Creating Hash and Hashable instances
   , mixConstructor

@@ -23,6 +23,10 @@ siphashInputs = map (pack . concatMap reverse . chunk 8) $ inits [0 .. 0x3e] whe
 siphashVectors64 :: [Word64]
 siphashVectors64 = map (\bs-> foldr1 (.|.) $ zipWith unsafeShiftL (map fromIntegral bs) [0,8..]) siphashVectorsRaw64
 
+siphashVectors128 :: [(Word64, Word64)]
+siphashVectors128 = map ((\(x,y)-> (fixup x, fixup y)) . splitAt 8 . map fromIntegral) siphashVectorsRaw128
+  where fixup bs = foldr1 (.|.) $ zipWith unsafeShiftL bs [0,8..]
+
 -- mash these together then byteswap:
 siphashVectorsRaw64 :: [[Word8]]
 siphashVectorsRaw64 = [

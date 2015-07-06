@@ -1,7 +1,8 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
 module Data.Hashabler.SipHash (
-    siphash
+    siphash64
+  , siphash128
   ) where
 
 -- We use the identity monad for non-recursive binding and utilize name
@@ -174,16 +175,16 @@ siphashForWord (SipState{ .. }) m = runIdentity $
 # ifdef EXPORT_INTERNALS
 -- | USERS SHOULD NOT SEE THIS SIGNATURE
 -- specialized for testing. See note in imports.
-siphash :: SipKey -> ByteString -> Word64
+siphash64 :: SipKey -> ByteString -> Word64
 # else
 
 -- | An implementation of 64-bit siphash-2-4.
 --
 -- TODO docs
-siphash :: Hashable a => SipKey -> a -> Word64
+siphash64 :: Hashable a => SipKey -> a -> Word64
 # endif
-{-# INLINE siphash #-}
-siphash (k0,k1) = \a-> runIdentity $ do
+{-# INLINE siphash64 #-}
+siphash64 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
         v1 = 0x646f72616e646f6d
         v2 = 0x6c7967656e657261
@@ -193,11 +194,6 @@ siphash (k0,k1) = \a-> runIdentity $ do
     v2 <- return $ v2 `xor` k0;
     v1 <- return $ v1 `xor` k1;
     v0 <- return $ v0 `xor` k0;
-
--- TODO
--- #ifdef DOUBLE
---   v1 ^= 0xee;
--- #endif
 
     -- Initialize rest of SipState:
     let mPart = 0
@@ -222,13 +218,6 @@ siphash (k0,k1) = \a-> runIdentity $ do
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
     v0 <- return $ v0 `xor` b
 
-{-
--- #ifndef DOUBLE
---   v2 ^= 0xff;
--- #else
---   v2 ^= 0xee;  -- TODO
--- #endif
--}
     -- 0xff may be "Any non-zero value":
     v2 <- return $ v2 `xor` 0xff
 
@@ -240,18 +229,81 @@ siphash (k0,k1) = \a-> runIdentity $ do
 
     return $! v0 `xor` v1 `xor` v2 `xor` v3
 
-{- TODO
--- #ifdef DOUBLE
---   v1 ^= 0xdd;
+-- TODO make these return special named types?
+
+# ifdef EXPORT_INTERNALS
+-- | USERS SHOULD NOT SEE THIS SIGNATURE
+-- specialized for testing. See note in imports.
+siphash128 :: SipKey -> ByteString -> (Word64, Word64)
+# else
+
+
+-- TODO if we extend this approach beyond 128-bits, then re-combine as much as
+-- possible (at least factor out up until final mixing.
+
+-- | An implementation of 64-bit siphash-2-4.
+--
+-- TODO docs
+siphash128 :: Hashable a => SipKey -> a -> (Word64, Word64)
+# endif
+{-# INLINE siphash128 #-}
+siphash128 (k0,k1) = \a-> runIdentity $ do
+    let v0 = 0x736f6d6570736575
+        v1 = 0x646f72616e646f6d
+        v2 = 0x6c7967656e657261
+        v3 = 0x7465646279746573
+
+    v3 <- return $ v3 `xor` k1;
+    v2 <- return $ v2 `xor` k0;
+    v1 <- return $ v1 `xor` k1;
+    v0 <- return $ v0 `xor` k0;
+
+    -- N.B. ADDED in 128:
+    v1 <- return $ v1 `xor` 0xee
+
+    -- Initialize rest of SipState:
+    let mPart = 0
+        bytesRemaining = 8
+        inlen = 0
+    SipState{ .. } <- return $ 
+#     ifdef EXPORT_INTERNALS
+        -- specialized for testing. See note in imports.
+        hashByteString
+#     else
+        hash 
+#     endif
+          (SipState { .. }) a
+
+
+    let !b = inlen `unsafeShiftL` 56
+    b <- return $ b .|. mPart
+
+    v3 <- return $ v3 `xor` b
+    -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    v0 <- return $ v0 `xor` b
+
+    -- N.B. 0xff CHANGED to 0xee in 128:
+    -- 0xee may be "Any non-zero value":
+    v2 <- return $ v2 `xor` 0xee
 
 --   for( i=0; i<dROUNDS; ++i ) SIPROUND;
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
 
---   b = v0 ^ v1 ^ v2  ^ v3;
---   U64TO8_LE( out+8, b );
--- #endif
+    let !b0 = v0 `xor` v1 `xor` v2 `xor` v3
 
---   return 0;
--- }
--}
+    -- N.B. ADDED in 128:
+    v1 <- return $ v1 `xor` 0xdd
+--   for( i=0; i<dROUNDS; ++i ) SIPROUND;
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
 
+    let !b1 = v0 `xor` v1 `xor` v2 `xor` v3
 
+    return (b0,b1)

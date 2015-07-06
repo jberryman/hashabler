@@ -65,7 +65,7 @@ testsMain = do
     checkMiscUnitTests
     checkHashableInstances
     checkVectors
-    checkSiphashSanity
+    -- checkSiphashSanity -- TODO
 
 checkVectors :: IO ()
 checkVectors = do
@@ -84,22 +84,32 @@ checkVectors = do
         unless (fnvInputsHashed64 == fnv1a64OutMassaged) $
             error "fnvInputsHashed64 /= fnv1a64OutMassaged"
 
-    test "Checking SipHash spec vectors" $
-        let outs = map (siphash siphashKey) siphashInputs
-         in unless (length outs > 0 && outs == siphashVectors64) $
-              error $ "Some Siphash64 vectors failed: "++(show outs)
+    test "Checking SipHash spec vectors" $ do
+        let outs64 = map (siphash64 siphashKey) siphashInputs
+            outs128 = map (siphash128 siphashKey) siphashInputs
+        unless (length outs64 > 0 && length outs128 > 0) $
+            error "tests invalid"
+        unless (outs64 == siphashVectors64) $
+            error $ "Some Siphash64 vectors failed: "++(show outs64)
+        unless (outs128 == siphashVectors128) $
+            error $ "Some Siphash128 vectors failed: "++(show outs128)
         
     test "Checking generated vectors for all hash functions" $ do
         failures <- checkGeneratedVectors
         unless (null failures) $
             print failures >> error "Got some failures in checkGeneratedVectors!"
 
+{- TODO after bootstrap vectors
 -- check all codepaths in siphash 'hash' instance, and make sure we're not
 -- dropping any input bytes in some way.
 checkSiphashSanity :: IO ()
-checkSiphashSanity = do return ()  -- TODO
+checkSiphashSanity = 
     -- different combinations of tuples of word* sizes
     -- check that altering each individual byte results in different hashes
+  where uniqueHashes = [
+            siphash siphashKey (
+            -- TODO need to make conditional siphash able to also use 'hash'
+            -}
 
 checkMiscUnitTests :: IO ()
 checkMiscUnitTests = do

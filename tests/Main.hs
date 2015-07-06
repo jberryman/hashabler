@@ -15,6 +15,7 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.Primitive as P
 
 import Vectors.FNV
+import Vectors.SipHash
 
 import Foreign.Marshal.Utils (fromBool)
 
@@ -64,6 +65,7 @@ testsMain = do
     checkMiscUnitTests
     checkHashableInstances
     checkVectors
+    checkSiphashSanity
 
 checkVectors :: IO ()
 checkVectors = do
@@ -81,11 +83,23 @@ checkVectors = do
             fnv1a64OutMassaged = map (fnv64 . mixConstructor 0 . FNV64) fnv1a64Out
         unless (fnvInputsHashed64 == fnv1a64OutMassaged) $
             error "fnvInputsHashed64 /= fnv1a64OutMassaged"
+
+    test "Checking SipHash spec vectors" $
+        let outs = map (siphash siphashKey) siphashInputs
+         in unless (length outs > 0 && outs == siphashVectors64) $
+              error $ "Some Siphash64 vectors failed: "++(show outs)
         
     test "Checking generated vectors for all hash functions" $ do
         failures <- checkGeneratedVectors
         unless (null failures) $
             print failures >> error "Got some failures in checkGeneratedVectors!"
+
+-- check all codepaths in siphash 'hash' instance, and make sure we're not
+-- dropping any input bytes in some way.
+checkSiphashSanity :: IO ()
+checkSiphashSanity = do return ()  -- TODO
+    -- different combinations of tuples of word* sizes
+    -- check that altering each individual byte results in different hashes
 
 checkMiscUnitTests :: IO ()
 checkMiscUnitTests = do

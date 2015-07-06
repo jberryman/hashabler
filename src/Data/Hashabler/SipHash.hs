@@ -189,14 +189,6 @@ siphash (k0,k1) = \a-> runIdentity $ do
         v2 = 0x6c7967656e657261
         v3 = 0x7465646279746573
 
-{- TODO this at the end
-The "end" byte:
---   const uint8_t *end = in + inlen - ( inlen % sizeof( uint64_t ) );
-Bytes remaining after 64 bit chunks:
---   const int left = inlen & 7;
-'left' pushed all the way left:
---   b = ( ( uint64_t )inlen ) << 56;
--}
     v3 <- return $ v3 `xor` k1;
     v2 <- return $ v2 `xor` k0;
     v1 <- return $ v1 `xor` k1;
@@ -221,24 +213,8 @@ Bytes remaining after 64 bit chunks:
           (SipState { .. }) a
 
 
-{- TODO
-A this point we start to use length (which we should know at this point too):
-This is folding in remaining bytes, but I don't totally understand this:
---   switch( left )
---   {
---   case 7: b |= ( ( uint64_t )in[ 6] )  << 48;
---   case 6: b |= ( ( uint64_t )in[ 5] )  << 40;
---   case 5: b |= ( ( uint64_t )in[ 4] )  << 32;
---   case 4: b |= ( ( uint64_t )in[ 3] )  << 24;
---   case 3: b |= ( ( uint64_t )in[ 2] )  << 16;
---   case 2: b |= ( ( uint64_t )in[ 1] )  <<  8;
---   case 1: b |= ( ( uint64_t )in[ 0] ); break;
---   case 0: break;
---   }
--}
-
     let !b = inlen `unsafeShiftL` 56
-    -- TODO OR remaining bytes into `b` as per above
+    b <- return $ b .|. mPart
 
     v3 <- return $ v3 `xor` b
     -- for( i=0; i<cROUNDS; ++i ) SIPROUND;

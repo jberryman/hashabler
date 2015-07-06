@@ -23,17 +23,6 @@ import Control.Exception(assert)
 import Data.Hashabler.Internal
 
 
-#ifdef EXPORT_INTERNALS
--- Our implementation of 'hash' for ByteString (and all variable-length types)
--- calls `mixConstructor` after hashing all bytes. We do an ugly hack here
--- where when testing we specialize siphash to operate on ByteString, and use
--- hashByteString directly so that we avoid the final mixConstructor and can
--- use the test vectors from the siphash reference implementation directly.
--- TODO once we bootstrap our implementation we can generate our own vectors
--- and then ditch this hack.
-import Data.ByteString
-#endif
-
 {- Hard-coded for now. TODO later make configurable if desired
 -- /* default: SipHash-2-4 */
 -- #define cROUNDS 2
@@ -172,17 +161,11 @@ siphashForWord (SipState{ .. }) m = runIdentity $
         return (v0,v1,v2,v3)
 
 
-# ifdef EXPORT_INTERNALS
--- | USERS SHOULD NOT SEE THIS SIGNATURE
--- specialized for testing. See note in imports.
-siphash64 :: SipKey -> ByteString -> Word64
-# else
 
 -- | An implementation of 64-bit siphash-2-4.
 --
 -- TODO docs
 siphash64 :: Hashable a => SipKey -> a -> Word64
-# endif
 {-# INLINE siphash64 #-}
 siphash64 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -199,15 +182,7 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
     let mPart = 0
         bytesRemaining = 8
         inlen = 0
-    SipState{ .. } <- return $ 
-#     ifdef EXPORT_INTERNALS
-        -- specialized for testing. See note in imports.
-        hashByteString
-#     else
-        hash 
-#     endif
-          (SipState { .. }) a
-
+    SipState{ .. } <- return $ hash (SipState { .. }) a
 
     let !b = inlen `unsafeShiftL` 56
     b <- return $ b .|. mPart
@@ -231,12 +206,6 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
 
 -- TODO make these return special named types?
 
-# ifdef EXPORT_INTERNALS
--- | USERS SHOULD NOT SEE THIS SIGNATURE
--- specialized for testing. See note in imports.
-siphash128 :: SipKey -> ByteString -> (Word64, Word64)
-# else
-
 
 -- TODO if we extend this approach beyond 128-bits, then re-combine as much as
 -- possible (at least factor out up until final mixing.
@@ -245,7 +214,6 @@ siphash128 :: SipKey -> ByteString -> (Word64, Word64)
 --
 -- TODO docs
 siphash128 :: Hashable a => SipKey -> a -> (Word64, Word64)
-# endif
 {-# INLINE siphash128 #-}
 siphash128 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -265,15 +233,7 @@ siphash128 (k0,k1) = \a-> runIdentity $ do
     let mPart = 0
         bytesRemaining = 8
         inlen = 0
-    SipState{ .. } <- return $ 
-#     ifdef EXPORT_INTERNALS
-        -- specialized for testing. See note in imports.
-        hashByteString
-#     else
-        hash 
-#     endif
-          (SipState { .. }) a
-
+    SipState{ .. } <- return $ hash (SipState { .. }) a
 
     let !b = inlen `unsafeShiftL` 56
     b <- return $ b .|. mPart

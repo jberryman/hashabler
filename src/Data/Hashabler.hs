@@ -109,9 +109,6 @@ module Data.Hashabler (
   -- * Internal functions exposed for testing; you shouldn't see these
   , hashFoldl'
   , hashLeftUnfolded
-  -- So that we can omit the mixConstructor, and use test vectors provided by
-  -- SipHash directly:
-  , hashByteString
   , bytesFloat, bytesDouble
   , magnitudeAsWord
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64

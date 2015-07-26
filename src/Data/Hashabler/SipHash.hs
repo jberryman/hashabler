@@ -3,6 +3,7 @@
 module Data.Hashabler.SipHash (
     siphash64
   , siphash128
+  , SipKey
   ) where
 
 -- We use the identity monad for non-recursive binding and utilize name
@@ -102,10 +103,11 @@ siphashForWord :: (Integral m,
                    )=> SipState -> m -> SipState
 {-# INLINE siphashForWord #-}
 siphashForWord (SipState{ .. }) m = runIdentity $
-    case compare fill 0 of
+  assert (bytesRemaining > 0 && bytesRemaining <= 8) $ 
+    case compare bytesRemaining mSize of
          -- room in mPart with room leftover
          GT -> do mPart <- orMparts mPart m
-                  let bytesRemaining = fill
+                  bytesRemaining <- return $ bytesRemaining - mSize
                   inlen <- return $ inlen + mSize
                   return $ SipState{ .. }
          -- m will exactly fill mPart
@@ -144,9 +146,6 @@ siphashForWord (SipState{ .. }) m = runIdentity $
 #    endif
 
     mSize = case mSizeBits of  8 -> 1 ; 16 -> 2 ; 32 -> 4 ; 64 -> 8 ; _ -> error "Impossible size!"
-
-    fill = assert (bytesRemaining > 0 && bytesRemaining <= 8) $ 
-              bytesRemaining - mSize
 
     orMparts mPart m = return $ 
         (mPart `unsafeShiftL` mSizeBits) .|. (fromIntegral m)

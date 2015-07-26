@@ -224,18 +224,6 @@ words32 wd64 = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
 
 -- These appear to return bytes in big endian on my machine (little endian),
 -- but TODO verify what happens on a BE machine.
-
--- Get raw IEEE bytes from floating point types.
--- TODO better, if possible
-bytesFloat :: Float -> (Word8,Word8,Word8,Word8)
-{-# INLINE bytesFloat #-}
-bytesFloat = bytes32 . floatToWord
-
-bytesDouble :: Double -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
-{-# INLINE bytesDouble #-}
-bytesDouble = bytes64 . doubleToWord
-
-
 -- See: http://stackoverflow.com/a/7002812/176841 . 
 -- Someone just kill me now...
 floatToWord :: Float -> Word32
@@ -695,15 +683,15 @@ _hash32_Word_64 h = \w->
 -- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Float where
     {-# INLINE hash #-}
-    hash h x = assert (isIEEE x) $
-        hash h $ bytesFloat x
+    hash h = \x-> assert (isIEEE x) $
+        mix32 h $ floatToWord x
 
 -- | Hash a Double as IEEE 754 double-precision format bytes. This is terribly
 -- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
 instance Hashable Double where
     {-# INLINE hash #-}
-    hash h x = assert (isIEEE x) $
-        hash h $ bytesDouble x
+    hash h = \x-> assert (isIEEE x) $
+        mix64 h $ doubleToWord x
 
 
 -- GHC uses two's complement representation for signed ints; C has this
@@ -724,7 +712,7 @@ instance Hashable Int32 where
 
 instance Hashable Int64 where
     {-# INLINE hash #-}
-    hash h = \i-> hash h (coerceInt64Word64 i :: Word64)
+    hash h = mix64 h . coerceInt64Word64
 
 -- Straightforward hashing of different Words and byte arrays:
 
@@ -742,7 +730,7 @@ instance Hashable Word32 where
 
 instance Hashable Word64 where
     {-# INLINE hash #-}
-    hash h = hash h . bytes64
+    hash = mix64
 
 
 -- ------------------------------------------------------------------
@@ -945,6 +933,34 @@ instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hasha
 instance (Hashable a1, Hashable a2, Hashable a3, Hashable a4, Hashable a5, Hashable a6, Hashable a7, Hashable a8) => Hashable (a1, a2, a3, a4, a5, a6, a7, a8) where
     {-# INLINE hash #-}
     hash hsh (a,b,c,d,e,f,g,h) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i)=> Hashable (a, b, c, d, e, f, g, h, i) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j)=> Hashable (a, b, c, d, e, f, g, h, i, j) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i, j) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j, Hashable k)=> Hashable (a, b, c, d, e, f, g, h, i, j, k) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i, j, k) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j `hash` k
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j, Hashable k, Hashable l)=> Hashable (a, b, c, d, e, f, g, h, i, j, k, l) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i, j, k, l) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j `hash` k `hash` l
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j, Hashable k, Hashable l, Hashable m)=> Hashable (a, b, c, d, e, f, g, h, i, j, k, l, m) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i, j, k, l, m) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j `hash` k `hash` l `hash` m
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j, Hashable k, Hashable l, Hashable m, Hashable n)=> Hashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i, j, k, l, m, n) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j `hash` k `hash` l `hash` m `hash` n
+
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j, Hashable k, Hashable l, Hashable m, Hashable n, Hashable o)=> Hashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) where
+    {-# INLINE hash #-}
+    hash hsh (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j `hash` k `hash` l `hash` m `hash` n `hash` o
 
 -- WISHLIST:
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.

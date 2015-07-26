@@ -43,6 +43,7 @@ module Data.Hashabler (
   -- TODO
   , siphash64
   , siphash128
+  , SipKey
 
   -- * Creating Hash and Hashable instances
   , mixConstructor
@@ -109,8 +110,8 @@ module Data.Hashabler (
   -- * Internal functions exposed for testing; you shouldn't see these
   , hashFoldl'
   , hashLeftUnfolded
-  , bytesFloat, bytesDouble
   , magnitudeAsWord
+  , bytes32, bytes64, floatToWord, doubleToWord
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
   , _bytes64_32 , _bytes64_64, _signByte
 #endif

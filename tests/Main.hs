@@ -84,8 +84,6 @@ checkVectors = do
         unless (fnvInputsHashed64 == fnv1a64OutMassaged) $
             error "fnvInputsHashed64 /= fnv1a64OutMassaged"
 
-    -- TODO Also check against lists of various tuples of tuples containing
-    --      64-bits each; verify these match our vectors as well.
     test "Checking SipHash spec vectors" $ do
         let outs64 = map (siphash64 siphashKey) siphashInputs
             outs128 = map (siphash128 siphashKey) siphashInputs
@@ -126,12 +124,12 @@ checkSiphashSanity = test "SipHash sanity" $ do
               , [siphash64 siphashKey (w16,w8,w64) | w16 <- w16s,w8 <- w8s,w64 <- w64s ]
               , [siphash64 siphashKey (w32,w64) | w32 <- w32s,w64 <- w64s ]
               , [siphash64 siphashKey (w8,w32,w64) | w8 <- w8s,w32 <- w32s,w64 <- w64s ]
-              , [siphash64 siphashKey (w8,w32,w32) | w8 <- w8s,w32 <- w32s ]  -- TODO NOTE: BAD!
+              , [siphash64 siphashKey (w8,w32,w32) | w8 <- w8s,w32 <- w32s ]
               , [siphash64 siphashKey (w32,w16,w64) | w32 <- w32s,w16 <- w16s,w64 <- w64s ]
-              , [siphash64 siphashKey (w32,w16,w32) | w32 <- w32s,w16 <- w16s ]  -- TODO NOTE: OKAY
+              , [siphash64 siphashKey (w32,w16,w32) | w32 <- w32s,w16 <- w16s ]
               , [siphash64 siphashKey (w8,w16,w32,w64) | w8 <- w8s,w16 <- w16s,w32 <- w32s,w64 <- w64s ]
-              , [siphash64 siphashKey (w8,w16,w32,w32) | w8 <- w8s,w16 <- w16s,w32 <- w32s ]  -- TODO NOTE: BAD!
-              , [siphash64 siphashKey (w8,w16,w32,w16) | w8 <- w8s,w32 <- w32s,w16 <- w16s ]  -- TODO NOTE BAD!
+              , [siphash64 siphashKey (w8,w16,w32,w32) | w8 <- w8s,w16 <- w16s,w32 <- w32s ]
+              , [siphash64 siphashKey (w8,w16,w32,w16) | w8 <- w8s,w32 <- w32s,w16 <- w16s ]
               ]
 
         identicalHashes = [

@@ -1,7 +1,9 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
 module Data.Hashabler.SipHash (
-    siphash64
+    SipHash64(..)
+  , siphash64
+  , SipHash128(..)
   , siphash128
   , SipKey
   ) where
@@ -12,10 +14,6 @@ module Data.Hashabler.SipHash (
 --
 -- https://github.com/veorq/SipHash/blob/master/siphash24.c
 --  
---  TODO after we implement tests, play a bit with tweaking algorithm (e.g. order of independent operations)
---       look at core
-
--- TODO need to depend on mtl or transformers for base < 4.8
 import Data.Functor.Identity
 import Data.Word (Word64)
 import Data.Bits
@@ -62,8 +60,10 @@ sipRound v0 v1 v2 v3 = runIdentity $ do
     return (v0, v1, v2, v3)
 
 
-
+-- | A 128-bit secret key. This should be generated randomly and must be kept
+-- secret.
 type SipKey = (Word64,Word64)
+
 data SipState = SipState {
                     v0 :: !Word64
                   , v1 :: !Word64
@@ -160,11 +160,17 @@ siphashForWord (SipState{ .. }) m = runIdentity $
         return (v0,v1,v2,v3)
 
 
+newtype SipHash64 = SipHash64 Word64
+    deriving (Show, Eq)
+data SipHash128 = SipHash128 !Word64 !Word64
+    deriving (Show, Eq)
+
 
 -- | An implementation of 64-bit siphash-2-4.
 --
--- TODO docs
-siphash64 :: Hashable a => SipKey -> a -> Word64
+-- This function is fast on 64-bit machines, and provides very good hashing
+-- properties and protection against hash flooding attacks.
+siphash64 :: Hashable a => SipKey -> a -> SipHash64
 {-# INLINE siphash64 #-}
 siphash64 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -201,9 +207,8 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
 
-    return $! v0 `xor` v1 `xor` v2 `xor` v3
+    return $! SipHash64 $! v0 `xor` v1 `xor` v2 `xor` v3
 
--- TODO make these return special named types?
 
 
 -- TODO if we extend this approach beyond 128-bits, then re-combine as much as
@@ -211,8 +216,9 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
 
 -- | An implementation of 64-bit siphash-2-4.
 --
--- TODO docs
-siphash128 :: Hashable a => SipKey -> a -> (Word64, Word64)
+-- This function is fast on 64-bit machines, and provides very good hashing
+-- properties and protection against hash flooding attacks.
+siphash128 :: Hashable a => SipKey -> a -> SipHash128
 {-# INLINE siphash128 #-}
 siphash128 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -265,4 +271,4 @@ siphash128 (k0,k1) = \a-> runIdentity $ do
 
     let !b1 = v0 `xor` v1 `xor` v2 `xor` v3
 
-    return (b0,b1)
+    return $! SipHash128 b0 b1

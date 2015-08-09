@@ -40,9 +40,11 @@ module Data.Hashabler (
   , fnvOffsetBasis64
   
   -- * Hashing with the SipHash algorithm
-  -- TODO
-  , siphash64
-  , siphash128
+  -- | SipHash is a fast hashing algorithm with very good mixing properties,
+  -- designed to be very secure against hash-flooding DOS attacks. SipHash is a
+  -- good choice whenever your application is hashing untrusted user data.
+  , SipHash64(..), siphash64
+  , SipHash128(..), siphash128
   , SipKey
 
   -- * Creating Hash and Hashable instances

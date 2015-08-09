@@ -89,9 +89,9 @@ checkVectors = do
             outs128 = map (siphash128 siphashKey) siphashInputs
         unless (length outs64 > 0 && length outs128 > 0) $
             error "tests invalid"
-        unless (outs64 == siphashVectors64) $
+        unless (outs64 == map SipHash64 siphashVectors64) $
             error $ "Some Siphash64 vectors failed: "++(show outs64)
-        unless (outs128 == siphashVectors128) $
+        unless (outs128 == map (uncurry SipHash128) siphashVectors128) $
             error $ "Some Siphash128 vectors failed: "++(show outs128)
         
     test "Checking generated vectors for all hash functions" $ do

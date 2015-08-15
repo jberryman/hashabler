@@ -63,7 +63,7 @@ library
       CPP-Options:     -DEXPORT_INTERNALS
 
   exposed-modules:     Data.Hashabler
-  other-modules:       MachDeps
+  other-modules:       MachDeps, Data.Hashabler.Internal, Data.Hashabler.SipHash
   -- other-extensions:    
                        -- GHC 7.2.1:
   build-depends:       base >=4.4 && <5
@@ -74,6 +74,9 @@ library
                      , ghc-prim
                      -- For endianness test:
                      , template-haskell
+  if impl(ghc < 7.9)
+    -- for Data.Functor.Identity
+    build-depends:     transformers
 
   if flag(integer-gmp)
       Build-depends:   integer-gmp >= 0.2
@@ -82,8 +85,6 @@ library
   default-language:    Haskell2010
   ghc-options: -Wall -fwarn-tabs -O2 -funbox-strict-fields
 
--- TODO:
--- test-suite quality
 
 -- I'm not sure how to make this test-suite and still be able to get
 -- conditional export list in library:
@@ -94,6 +95,7 @@ test-suite tests
   main-is:             Main.hs
   other-modules:       Consistency
                      , Vectors.FNV
+                     , Vectors.SipHash
 
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields -fno-ignore-asserts
   if flag(dev)

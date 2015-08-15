@@ -15,6 +15,7 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.Primitive as P
 
 import Vectors.FNV
+import Vectors.SipHash
 
 import Foreign.Marshal.Utils (fromBool)
 
@@ -64,6 +65,7 @@ testsMain = do
     checkMiscUnitTests
     checkHashableInstances
     checkVectors
+    checkSiphashSanity
 
 checkVectors :: IO ()
 checkVectors = do
@@ -81,11 +83,72 @@ checkVectors = do
             fnv1a64OutMassaged = map (fnv64 . mixConstructor 0 . FNV64) fnv1a64Out
         unless (fnvInputsHashed64 == fnv1a64OutMassaged) $
             error "fnvInputsHashed64 /= fnv1a64OutMassaged"
+
+    test "Checking SipHash spec vectors" $ do
+        let outs64 = map (siphash64 siphashKey) siphashInputs
+            outs128 = map (siphash128 siphashKey) siphashInputs
+        unless (length outs64 > 0 && length outs128 > 0) $
+            error "tests invalid"
+        unless (outs64 == map SipHash64 siphashVectors64) $
+            error $ "Some Siphash64 vectors failed: "++(show outs64)
+        unless (outs128 == map (uncurry SipHash128) siphashVectors128) $
+            error $ "Some Siphash128 vectors failed: "++(show outs128)
         
     test "Checking generated vectors for all hash functions" $ do
         failures <- checkGeneratedVectors
         unless (null failures) $
             print failures >> error "Got some failures in checkGeneratedVectors!"
+
+-- check all codepaths in siphash 'hash' instance, and make sure we're not
+-- dropping any input bytes in some way. Sufficient to check siphash64 here, as
+-- all share the Hash instance implementation.
+checkSiphashSanity :: IO ()
+checkSiphashSanity = test "SipHash sanity" $ do
+    -- different combinations of tuples of word* sizes
+    -- check that altering each individual byte results in different hashes
+    unless (length uniqueHashes > 0 && length identicalHashes > 0) $
+        error "checkSiphashSanity not valid"
+    unless (nub uniqueHashes == uniqueHashes) $ do
+        error $ "checkSiphashSanity: not all hashes unique! "++ (show (uniqueHashes \\ nub uniqueHashes))
+    unless (length (nub identicalHashes) == 1) $
+        error "checkSiphashSanity: all of these should have been identical!"
+  where w8s = [ 0xFF, 0x01] :: [Word8]
+        w16s = [0xFF03, 0x02FF] :: [Word16]
+        w32s = [0xFF050607 , 0x04FF0607 , 0x0405FF07 , 0x040506FF] :: [Word32]
+        w64s = [ 0xFF09101112131415 , 0x08FF101112131415 , 0x0809FF1112131415 , 0x080910FF12131415 
+               , 0x08091011FF131415 , 0x0809101112FF1415 , 0x080910111213FF15 , 0x08091011121314FF ] :: [Word64]
+
+        uniqueHashes = concat [
+                [siphash64 siphashKey (w8,w64) | w8 <- w8s, w64 <- w64s ]
+              , [siphash64 siphashKey (w16,w64) | w16 <- w16s,w64 <- w64s ]
+              , [siphash64 siphashKey (w16,w8,w64) | w16 <- w16s,w8 <- w8s,w64 <- w64s ]
+              , [siphash64 siphashKey (w32,w64) | w32 <- w32s,w64 <- w64s ]
+              , [siphash64 siphashKey (w8,w32,w64) | w8 <- w8s,w32 <- w32s,w64 <- w64s ]
+              , [siphash64 siphashKey (w8,w32,w32) | w8 <- w8s,w32 <- w32s ]
+              , [siphash64 siphashKey (w32,w16,w64) | w32 <- w32s,w16 <- w16s,w64 <- w64s ]
+              , [siphash64 siphashKey (w32,w16,w32) | w32 <- w32s,w16 <- w16s ]
+              , [siphash64 siphashKey (w8,w16,w32,w64) | w8 <- w8s,w16 <- w16s,w32 <- w32s,w64 <- w64s ]
+              , [siphash64 siphashKey (w8,w16,w32,w32) | w8 <- w8s,w16 <- w16s,w32 <- w32s ]
+              , [siphash64 siphashKey (w8,w16,w32,w16) | w8 <- w8s,w32 <- w32s,w16 <- w16s ]
+              ]
+
+        identicalHashes = [
+              siphash64 siphashKey (0x01 :: Word8, 0x02 :: Word8, 0x03 :: Word8, 0x04 :: Word8, 0x05 :: Word8, 0x06 :: Word8, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
+            , siphash64 siphashKey (0x0102 :: Word16, 0x03 :: Word8, 0x04 :: Word8, 0x0506 :: Word16, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
+            , siphash64 siphashKey (0x01 :: Word8, 0x02030405 :: Word32, 0x06 :: Word8, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
+            , siphash64 siphashKey (0x01020304 :: Word32, 0x05060708 :: Word32,   0xDEADBEED :: Word32)
+            , siphash64 siphashKey (0x0102030405060708 :: Word64,   0xDEADBEED :: Word32)
+            ]
+
+-- Helpers for below:
+bytesFloat :: Float -> (Word8,Word8,Word8,Word8)
+{-# INLINE bytesFloat #-}
+bytesFloat = bytes32 . floatToWord
+
+bytesDouble :: Double -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
+{-# INLINE bytesDouble #-}
+bytesDouble = bytes64 . doubleToWord
+
 
 checkMiscUnitTests :: IO ()
 checkMiscUnitTests = do

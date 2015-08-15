@@ -18,6 +18,7 @@ module Data.Hashabler (
 
   Please see the project description for more information.
  -}
+ TODO ALSO REWRITE ABOVE
   -- * The Hashable and Hash classes
     Hashable(..)
   , Hash(..)
@@ -48,19 +49,40 @@ module Data.Hashabler (
   , SipKey
 
   -- * Creating Hash and Hashable instances
-  , mixConstructor
-  -- ** Defining principled Hashable instances
 {- | 
  #principled#
 
+ When defining 'Hashable' instances for your own algebraic data types you
+ should do the following.
+
+ For types with /a single constructor/, simply call 'hash' on each of the
+ constructor's children, for instance:
+
+ > instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
+ >     hash h (a,b,c) = h `hash` a `hash` b `hash` c
+
+ And when a type has multiple constructors you should additionally call
+ 'mixConstructor' with a different argument for each constructor.
+
+ > instance (Hashable a, Hashable b) => Hashable (Either a b) where
+ >     hash h (Left a)  = mixConstructor 0 $ hash h a
+ >     hash h (Right b) = mixConstructor 1 $ hash h b
+
+ In the future we may offer a way to derive instances like this automatically.
+-}
+  , mixConstructor
+
+  -- ** Detailed discussion of principled Hashable instances
+{- |
  Special care needs to be taken when defining instances of Hashable for your
  own types, especially for recursive types and types with multiple
- constructors. First instances need to ensure that /distinct values produce
- distinct hash values/. Here's an example of a /bad/ implementation for 'Maybe':
+ constructors. First instances need to ensure that 
+ /distinct values produce distinct hash values/. Here's an example of a /bad/
+ implementation for 'Maybe':
  
- > instance (Hashable a)=> Hashable (Maybe a) where              -- BAD!
- >     hash h (Just a) = h `hash` a          -- BAD!
- >     hash h Nothing  = h `hash` (1::Word8) -- BAD!
+ > instance (Hashable a)=> Hashable (Maybe a) where -- BAD!
+ >     hash h (Just a) = h `hash` a                 -- BAD!
+ >     hash h Nothing  = h `hash` (1::Word8)        -- BAD!
 
  Here @Just (1::Word8)@ hashes to the same value as @Nothing@.
 
@@ -69,8 +91,8 @@ module Data.Hashabler (
  @x `hash` y == x `hash` y1 `hash` y2 where (y1,y2) = f y@... or something.
  The idea is we want to avoid the following kinds of collisions:
 
- > hash [Just 1, Nothing] == hash [Just 1]     -- BAD!
- > hash ([1,2], [3])      == hash ([1], [2,3]  -- BAD!)
+ > hash [Just 1, Nothing] == hash [Just 1]          -- BAD!
+ > hash ([1,2], [3])      == hash ([1], [2,3])      -- BAD!
 
  Maybe what we mean is that where @a@ is a 'Monoid', we expect replacing
  `mappend` with the hash operation to always yield /different/ values. This

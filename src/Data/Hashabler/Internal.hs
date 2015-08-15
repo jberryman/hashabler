@@ -278,8 +278,9 @@ class Hashable a where
 -- incrementally mix in bytes (or chunks of bytes). Bytes are fed to these
 -- methods in our 'Hashable' instances, which promise to call these methods in
 -- a platform-independent way.
+TODO REWRITE ABOVE, MAYBE CHANGE NAME OF HASH
 --
--- Instances of 'Hash' only need to define 'mix8', but may additional handle
+-- Instances of 'Hash' only need to define 'mix8', but may additionally handle
 -- @mix@-ing in larger word chunks for performance reasons. For instance a hash
 -- function which operates on four bytes at a time might make use of 'mix32',
 -- and perhaps in 'mix8' pad with three additional 0s.

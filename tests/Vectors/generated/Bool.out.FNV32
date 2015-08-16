@@ -1,1 +1,1 @@
-[FNV32 {fnv32 = 67918732},FNV32 {fnv32 = 84696351}]
+[Hash32 {hashWord32 = 67918732},Hash32 {hashWord32 = 84696351}]

@@ -1,9 +1,7 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
 module Data.Hashabler.SipHash (
-    SipHash64(..)
-  , siphash64
-  , SipHash128(..)
+    siphash64
   , siphash128
   , SipKey
   ) where
@@ -76,7 +74,7 @@ data SipState = SipState {
                   , inlen :: !Word64  -- ^ we'll accumulate this as we consume
                   } deriving Eq
 
-instance Hash SipState where
+instance HashState SipState where
     mix8 st m = siphashForWord st m
     mix16 st m = siphashForWord st m
     mix32 st m = siphashForWord st m
@@ -160,17 +158,11 @@ siphashForWord (SipState{ .. }) m = runIdentity $
         return (v0,v1,v2,v3)
 
 
-newtype SipHash64 = SipHash64 Word64
-    deriving (Show, Eq)
-data SipHash128 = SipHash128 !Word64 !Word64
-    deriving (Show, Eq)
-
-
 -- | An implementation of 64-bit siphash-2-4.
 --
 -- This function is fast on 64-bit machines, and provides very good hashing
 -- properties and protection against hash flooding attacks.
-siphash64 :: Hashable a => SipKey -> a -> SipHash64
+siphash64 :: Hashable a => SipKey -> a -> Hash64
 {-# INLINE siphash64 #-}
 siphash64 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -207,7 +199,7 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
     (v0,v1,v2,v3) <- return $ sipRound v0 v1 v2 v3
 
-    return $! SipHash64 $! v0 `xor` v1 `xor` v2 `xor` v3
+    return $! Hash64 $! v0 `xor` v1 `xor` v2 `xor` v3
 
 
 
@@ -218,7 +210,7 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
 --
 -- This function is fast on 64-bit machines, and provides very good hashing
 -- properties and protection against hash flooding attacks.
-siphash128 :: Hashable a => SipKey -> a -> SipHash128
+siphash128 :: Hashable a => SipKey -> a -> Hash128
 {-# INLINE siphash128 #-}
 siphash128 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -271,4 +263,4 @@ siphash128 (k0,k1) = \a-> runIdentity $ do
 
     let !b1 = v0 `xor` v1 `xor` v2 `xor` v3
 
-    return $! SipHash128 b0 b1
+    return $! Hash128 b0 b1

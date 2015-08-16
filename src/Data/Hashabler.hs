@@ -4,35 +4,39 @@ module Data.Hashabler (
   The core of this library consists of 
      
   - the 'Hashable' class which defines how hashable chunks of bytes are
-    delivered to a hash function; new instances can be defined to support
-    the hashing of new datatypes using an existing algorithm
+    delivered to the data-consuming portion of a hash function; new instances
+    can be defined to support the hashing of new datatypes using an existing
+    algorithm
 
-  - the 'Hash' class which implements a particular hashing algorithm,
-    consuming bytes delivered in 'hash'; new instances can be defined to
-    support hashing existing 'Hashable' types with a new algorithm.
+  - the 'HashState' class which implements the data-consuming portion of a
+    particular hashing algorithm, consuming bytes delivered in 'hash'; a new
+    instance can be defined to implement a new hashing function that works on
+    existing 'Hashable' types.
 
-  Currently we implement only the 32 and 64-bit variations of the 
-  <http://www.isthe.com/chongo/tech/comp/fnv/ FNV-1a non-cryptographic hashing algorithm> 
-  ('hashFNV32' and 'hashFNV64'), which have good hashing properties and are
-  easy to implement in different languages and on different platforms.
+  We also include implementations for the following hash functions:
+  'hashFNV32', 'hashFNV64', 'siphash64', and 'siphash128'.
 
-  Please see the project description for more information.
+  Please see the project description for more information, including motivation.
  -}
- TODO ALSO REWRITE ABOVE
-  -- * The Hashable and Hash classes
-    Hashable(..)
-  , Hash(..)
 
-  -- * Hashing with the FNV-1a algorithm
-  , FNV32(..)
+  -- * Hash Functions
+    Hash32(..), Hash64(..), Hash128(..)
+
+  -- ** Hashing with the FNV-1a algorithm
+  -- | The FNV-1a hash (see <http://www.isthe.com/chongo/tech/comp/fnv/>) is
+  -- a fast and extremely simple hashing algorithm with fairly good mixing
+  -- properties. Its simplicity makes it a good choice if you need to implement
+  -- the same hashing routines on multiple platforms e.g. to verify a hash
+  -- generated in JS on a web client with a hash stored on your server.
+  --
+  -- If you are hashing untrusted user data and are concerned with hash
+  -- flooding attacks, <#siphash consider SipHash instead>.
   , hashFNV32
-  , FNV64(..)
   , hashFNV64
-  -- ** Internals
-  -- *** FNV Primes
+  -- *** FNV-1a Internal Parameters
+  -- | Magic FNV primes:
   , fnvPrime32
   , fnvPrime64
-  -- *** Standard seed values
   -- | The arbitrary initial seed values for different output hash sizes. These
   -- values are part of the spec, but there is nothing special about them;
   -- supposedly, in terms of hash quality, any non-zero value seed should be
@@ -40,15 +44,21 @@ module Data.Hashabler (
   , fnvOffsetBasis32
   , fnvOffsetBasis64
   
-  -- * Hashing with the SipHash algorithm
-  -- | SipHash is a fast hashing algorithm with very good mixing properties,
-  -- designed to be very secure against hash-flooding DOS attacks. SipHash is a
-  -- good choice whenever your application is hashing untrusted user data.
-  , SipHash64(..), siphash64
-  , SipHash128(..), siphash128
+  -- ** Hashing with the SipHash algorithm
+{- | 
+ #siphash#
+ 
+ SipHash is a fast hashing algorithm with very good mixing properties, designed
+ to be very secure against hash-flooding DOS attacks. SipHash is a good choice
+ whenever your application may be hashing untrusted user data.
+-}
   , SipKey
+  , siphash64
+  , siphash128
 
-  -- * Creating Hash and Hashable instances
+  -- * Hashable types
+  , Hashable(..)
+  -- ** Creating your own Hashable instances
 {- | 
  #principled#
 
@@ -71,9 +81,14 @@ module Data.Hashabler (
  In the future we may offer a way to derive instances like this automatically.
 -}
   , mixConstructor
+  
+  -- * Implementing new hash functions
+  , HashState(..)
 
   -- ** Detailed discussion of principled Hashable instances
 {- |
+ This is a work-in-progress, and purely IYI.
+
  Special care needs to be taken when defining instances of Hashable for your
  own types, especially for recursive types and types with multiple
  constructors. First instances need to ensure that 
@@ -116,9 +131,9 @@ module Data.Hashabler (
    constructor of our type
 
  To ensure hashing remains consistent across platforms, instances should not
- compile-time-conditionally call different @mix@-family 'Hash' functions.
+ compile-time-conditionally call different @mix@-family 'HashState' functions.
  This rule doesn't matter for instances like 'FNV32' which mix in data one byte
- at a time, but other 'Hash' instances may operate on multiple bytes at a time,
+ at a time, but other 'HashState' instances may operate on multiple bytes at a time,
  perhaps using padding bytes, so this becomes important.
 
  A final important note: we're not concerned with collisions between values of
@@ -135,6 +150,7 @@ module Data.Hashabler (
   , hashFoldl'
   , hashLeftUnfolded
   , magnitudeAsWord
+  , FNV32(..), FNV64(..)
   , bytes32, bytes64, floatToWord, doubleToWord
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
   , _bytes64_32 , _bytes64_64, _signByte

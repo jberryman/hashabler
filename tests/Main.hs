@@ -39,6 +39,7 @@ import GHC.Natural (Natural)
 import System.IO.Unsafe(unsafeDupablePerformIO)
 import Prelude
 
+import Data.Bits(xor)
 
 main :: IO ()
 main = do
@@ -67,20 +68,27 @@ testsMain = do
     checkVectors
     checkSiphashSanity
 
+-- TODO better. Just bootstrap test vectors
+mixConstructorFNV32 :: Word8 -> Word32 -> Word32
+mixConstructorFNV32 b h32 = (h32 `xor` fromIntegral (0xFF - b)) * fnvPrime32
+mixConstructorFNV64 :: Word8 -> Word64 -> Word64
+mixConstructorFNV64 b h64 = (h64 `xor` fromIntegral (0xFF - b)) * fnvPrime64
+
+
 checkVectors :: IO ()
 checkVectors = do
     test "Checking FNV spec vectors" $ do
         -- Check test vectors from the official FNV spec/implementation:
-        let fnvInputsHashed32 = map (fnv32 . hashFNV32 . C.pack) fnvIn
+        let fnvInputsHashed32 = map (hashWord32 . hashFNV32 . C.pack) fnvIn
             -- Our instances perform a final 'mixConstructor' on hashes of array
             -- types (see notes on "Defining principled Hashable instances") so
             -- we'll need to do this to our test vectors before comparing:
-            fnv1a32OutMassaged = map (fnv32 . mixConstructor 0 . FNV32) fnv1a32Out
+            fnv1a32OutMassaged = map (mixConstructorFNV32 0) fnv1a32Out
         unless (fnvInputsHashed32 == fnv1a32OutMassaged) $
             error "fnvInputsHashed32 /= fnv1a32OutMassaged"
         -- And for 64-bit version:
-        let fnvInputsHashed64 = map (fnv64 . hashFNV64 . C.pack) fnvIn
-            fnv1a64OutMassaged = map (fnv64 . mixConstructor 0 . FNV64) fnv1a64Out
+        let fnvInputsHashed64 = map (hashWord64 . hashFNV64 . C.pack) fnvIn
+            fnv1a64OutMassaged = map (mixConstructorFNV64 0) fnv1a64Out
         unless (fnvInputsHashed64 == fnv1a64OutMassaged) $
             error "fnvInputsHashed64 /= fnv1a64OutMassaged"
 
@@ -89,9 +97,9 @@ checkVectors = do
             outs128 = map (siphash128 siphashKey) siphashInputs
         unless (length outs64 > 0 && length outs128 > 0) $
             error "tests invalid"
-        unless (outs64 == map SipHash64 siphashVectors64) $
+        unless (outs64 == map Hash64 siphashVectors64) $
             error $ "Some Siphash64 vectors failed: "++(show outs64)
-        unless (outs128 == map (uncurry SipHash128) siphashVectors128) $
+        unless (outs128 == map (uncurry Hash128) siphashVectors128) $
             error $ "Some Siphash128 vectors failed: "++(show outs128)
         
     test "Checking generated vectors for all hash functions" $ do
@@ -212,10 +220,11 @@ checkHashableInstances = do
            let magWord64 = fromIntegral $ abs (int64::Int64) :: Word64
                signByte = if int64 < 0 then 1 else 0
             in hashFNV32 (fromIntegral int64 :: Integer)
-                 == mixConstructor signByte
+                 == (Hash32 $ mixConstructorFNV32 signByte $ hashWord32
                       (if magWord64 > fromIntegral (maxBound :: Word32)
                           then hashFNV32 magWord64
                           else hashFNV32 (fromIntegral magWord64 :: Word32))
+                      )
 
     -- FNV32 test vectors provide basic sanity for word/int instances. Here
     -- just make sure Word and Int types are equivalent.
@@ -381,19 +390,19 @@ checkHashableInstances = do
 
     -- Check tuples match lists, plus a mixConstructor.
     quickCheckErr 100 $ forAll (vector 2 :: Gen [Word8]) $ \ l@[a,b] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b))
     quickCheckErr 100 $ forAll (vector 3 :: Gen [Word8]) $ \ l@[a,b,c] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b,c))
     quickCheckErr 100 $ forAll (vector 4 :: Gen [Word8]) $ \ l@[a,b,c,d] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b,c,d))
     quickCheckErr 100 $ forAll (vector 5 :: Gen [Word8]) $ \ l@[a,b,c,d,e] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b,c,d,e))
     quickCheckErr 100 $ forAll (vector 6 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e,f))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b,c,d,e,f))
     quickCheckErr 100 $ forAll (vector 7 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f,g] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e,f,g))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b,c,d,e,f,g))
     quickCheckErr 100 $ forAll (vector 8 :: Gen [Word8]) $ \ l@[a,b,c,d,e,f,g,h] ->
-          hashFNV32 l == (mixConstructor 0 $ hashFNV32 (a,b,c,d,e,f,g,h))
+          hashFNV32 l == (Hash32 $ mixConstructorFNV32 0 $ hashWord32 $ hashFNV32 (a,b,c,d,e,f,g,h))
 
     -- TODO more of these here; this should be fine for now though, as all the
     -- variable width types above check in with [a] at some point.
@@ -446,19 +455,19 @@ checkIntegerFallback :: Large Int -> Large Int -> Bool
 checkIntegerFallback (Large base) (Large mul) = 
     let baseInteger = fromIntegral base :: Integer
         integer = baseInteger * ((fromIntegral mul) ^ (2:: Int))
-     in (_hash32Integer fnvOffsetBasis32 integer :: FNV32) == hashFNV32 integer
+     in (_hash32Integer fnvOffsetBasis32 integer ) == (FNV32 $ hashWord32 $ hashFNV32 integer)
 
 check32BitRangeInt64 :: Large Int32 -> Bool
 check32BitRangeInt64 (Large int32) = 
     let int64 = fromIntegral int32 :: Int64 
      in _hash32_Int_64 fnvOffsetBasis32 int64
-         == hashFNV32 int32
+         == (FNV32 $ hashWord32 $ hashFNV32 int32)
 
 check32BitRangeWord64 :: Large Word32 -> Bool
 check32BitRangeWord64 (Large word32) = 
     let word64 = fromIntegral word32 :: Word64 
      in _hash32_Word_64 fnvOffsetBasis32 word64
-         == hashFNV32 word32
+         == (FNV32 $ hashWord32 $ hashFNV32 word32)
 
 checkBytes64Alternatives :: Large Word64 -> Bool
 checkBytes64Alternatives (Large w64) = 

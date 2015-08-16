@@ -240,11 +240,17 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
 
+newtype Hash32 = Hash32 { hashWord32 :: Word32 }
+    deriving (Show, Read, Eq)
+newtype Hash64 = Hash64 { hashWord64 :: Word64 }
+    deriving (Show, Read, Eq)
+data Hash128 = Hash128 { hashWord128_0 :: !Word64, hashWord128_1 :: !Word64 }
+    deriving (Show, Read, Eq)
 
 
 -- | A class of types that can be converted into a hash value.  We expect all
 -- instances to display "good" hashing properties (w/r/t avalanche, bit
--- independence, etc.) when passed to a "good" 'Hash' function.
+-- independence, etc.) when passed to an ideal hash function.
 --
 -- We try to ensure that bytes are extracted from values in a way that is
 -- portable across architectures (where possible), and straightforward to
@@ -255,47 +261,48 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 -- from instances.
 class Hashable a where
     -- | Add the bytes from the second argument into the hash, producing a new
-    -- hash value. This is essentially a left fold of the methods of 'Hash'
-    -- over individual bytes extracted from @a@.
+    -- hash value. This is essentially a left fold of the methods of
+    -- 'HashState' over individual bytes extracted from @a@.
     --
-    -- For some instances of 'Hash', this method might be a complete hashing
-    -- algorithm, or might comprise the core of a hashing algorithm (perhaps
-    -- with some final mixing), or might do something completely apart from
-    -- hashing (e.g. simply cons bytes into a list for debugging).
+    -- For some instances of 'HashState', this method might be a complete
+    -- hashing algorithm, or might comprise the core of a hashing algorithm
+    -- (perhaps with some final mixing), or might do something completely apart
+    -- from hashing (e.g. simply cons bytes into a list for debugging).
     --
     -- Implementations must ensure that, for the same data: 
     --    
-    --    - @Word16/32/64@ arguments passed into the methods of 'Hash', and... 
+    --    - @Word16/32/64@ arguments passed into the methods of 'HashState',
+    --      and... 
     --
     --    - the choice of @mix@ function itself...
     --
     -- ...are consistent across architectures of different word size and
-    -- endianness.
-    hash :: (Hash h)=> h -> a -> h
+    -- endianness. For example do not define an instance which conditionally
+    -- implements 'mix64' only on 64-bit architectures.
+    hash :: (HashState h)=> h -> a -> h
 
 
--- | A class for hash functions which take a running hash value and
--- incrementally mix in bytes (or chunks of bytes). Bytes are fed to these
--- methods in our 'Hashable' instances, which promise to call these methods in
--- a platform-independent way.
-TODO REWRITE ABOVE, MAYBE CHANGE NAME OF HASH
+-- | A class for defining how a hash function consumes input data. Bytes are
+-- fed to these methods in our 'Hashable' instances, which promise to call
+-- these methods in a platform-independent way.
 --
--- Instances of 'Hash' only need to define 'mix8', but may additionally handle
--- @mix@-ing in larger word chunks for performance reasons. For instance a hash
--- function which operates on four bytes at a time might make use of 'mix32',
--- and perhaps in 'mix8' pad with three additional 0s.
+-- Instances of 'HashState' only need to define 'mix8', but may additionally
+-- handle @mix@-ing in larger word chunks for performance reasons. For instance
+-- a hash function which operates on four bytes at a time might make use of
+-- 'mix32', and perhaps in 'mix8' pad with three additional 0s.
 --
--- Endianness issues are handled in 'Hashable' instances.
-class (Eq h)=> Hash h where
-    -- | Hash in one byte.
+-- Endianness is normalized in 'Hashable' instances, so these mix methods can
+-- expect to receive identical words across platforms.
+class HashState h where
+    -- | Mix in one byte.
     mix8 :: h -> Word8 -> h
-    -- | Hash in a 2-byte word. Defaults to two 'mix8' on bytes from most to
+    -- | Mix in a 2-byte word. Defaults to two 'mix8' on bytes from most to
     -- least significant.
     mix16 :: h -> Word16 -> h
-    -- | Hash in a 4-byte word. Defaults to four 'mix8' on bytes from most to
+    -- | Mix in a 4-byte word. Defaults to four 'mix8' on bytes from most to
     -- least significant.
     mix32 :: h -> Word32 -> h
-    -- | Hash in a 8-byte word. Defaults to two 'mix32' on 32-byte words from
+    -- | Mix in a 8-byte word. Defaults to two 'mix32' on 32-byte words from
     -- most to least significant.
     mix64 :: h -> Word64 -> h
 
@@ -343,7 +350,6 @@ fnvOffsetBasis64 = FNV64 14695981039346656037
 -- fnvOffsetBasis256 = FNV256 100029257958052580907070968620625704837092796014241193945225284501741471925557
 
 
--- | The FNV-1a hash algorithm. See <http://www.isthe.com/chongo/tech/comp/fnv/>
 newtype FNV32 = FNV32 { fnv32 :: Word32 }
     deriving (Eq, Ord, Read, Show)
 
@@ -354,7 +360,7 @@ newtype FNV64 = FNV64 { fnv64 :: Word64 }
 -- | @
 -- 'mix8' ('FNV32' h32) b = 'FNV32' $ (h32 ``xor`` fromIntegral b) * 'fnvPrime32'
 -- @
-instance Hash FNV32 where
+instance HashState FNV32 where
     {-# INLINE mix8 #-}
     mix8 (FNV32 h32) = \b-> FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
     -- TODO look at inlining
@@ -363,17 +369,17 @@ instance Hash FNV32 where
 -- | Hash a value using the standard spec-prescribed 32-bit seed value.
 --
 -- @
---   hashFNV32 = 'hash' 'fnvOffsetBasis32'
+--   hashFNV32 = 'Hash32' . fnv32 . 'hash' 'fnvOffsetBasis32'
 -- @
-hashFNV32 :: Hashable a=> a -> FNV32
+hashFNV32 :: Hashable a=> a -> Hash32
 {-# INLINE hashFNV32 #-}
-hashFNV32 = hash fnvOffsetBasis32
+hashFNV32 = Hash32 . fnv32 . hash fnvOffsetBasis32
 
 
 -- | @
 -- 'mix8' ('FNV64' h64) b = 'FNV64' $ (h64 ``xor`` fromIntegral b) * 'fnvPrime64'
 -- @
-instance Hash FNV64 where
+instance HashState FNV64 where
     {-# INLINE mix8 #-}
     mix8 (FNV64 h64) = \b-> FNV64 $ (h64 `xor` fromIntegral b) * fnvPrime64
     -- TODO look at inlining
@@ -383,11 +389,11 @@ instance Hash FNV64 where
 -- may be slow on 32-bit machines.
 --
 -- @
---   hashFNV64 = 'hash' 'fnvOffsetBasis64'
+--   hashFNV64 = 'Hash64' . fnv64 . 'hash' 'fnvOffsetBasis64'
 -- @
-hashFNV64 :: Hashable a=> a -> FNV64
+hashFNV64 :: Hashable a=> a -> Hash64
 {-# INLINE hashFNV64 #-}
-hashFNV64 = hash fnvOffsetBasis64
+hashFNV64 = Hash64 . fnv64 . hash fnvOffsetBasis64
 
 
 -- ------------------------------------------------------------------
@@ -489,7 +495,7 @@ magnitudeAsWord = fromIntegral . abs
 #if WORD_SIZE_IN_BITS == 64
 -- Helper for hashing a 64-bit word, possibly omiting the first 32-bit chunk
 -- (if 0). We use this when normalizing big natural representations.
-mixSignificantMachWord64 :: (Hash h)=> h -> Word64 -> h
+mixSignificantMachWord64 :: (HashState h)=> h -> Word64 -> h
 {-# INLINE mixSignificantMachWord64 #-}
 mixSignificantMachWord64 h w64 = 
      let (word32_0, word32_1) = words32 w64
@@ -500,7 +506,7 @@ mixSignificantMachWord64 h w64 =
 
 
 -- Very slow Integer-implementation-agnostic hashing:
-_hash32Integer :: (Hash h)=> h -> Integer -> h
+_hash32Integer :: (HashState h)=> h -> Integer -> h
 _hash32Integer h i = 
     let (sgn, limbs) = _integerWords i
      in mixConstructor sgn $ 
@@ -534,7 +540,7 @@ _integerWords nSigned = (sign , go (abs nSigned) []) where
 --      0 which is represented as a 1-limb.
 --      - NOTE, though: Jp#/Jn# in Integer on GHC 7.10 guarantee that contained
 --        BigNat are non-zero
-hash32BigNatBytes :: (Hash h)=> h -> BigNat -> h
+hash32BigNatBytes :: (HashState h)=> h -> BigNat -> h
 {-# INLINE hash32BigNatBytes #-}
 hash32BigNatBytes h (BN# ba#) = 
     let ba = P.ByteArray ba#
@@ -559,7 +565,7 @@ instance Hashable BigNat where
 
 -- Hashing of internals of BigNat-format ByteArrays of at least 1 limb, for old
 -- and new style Integer from integer-gmp.
-hash32BigNatByteArrayBytes :: (Hash h)=> h -> Int -> P.ByteArray -> h
+hash32BigNatByteArrayBytes :: (HashState h)=> h -> Int -> P.ByteArray -> h
 {-# INLINE hash32BigNatByteArrayBytes #-}
 hash32BigNatByteArrayBytes h numLimbs ba = 
   assert (numLimbs > 0) $
@@ -661,7 +667,7 @@ instance Hashable Word where
 -- TODO Benchmarking + try unsafeCoerce on 64-bit
 -- NOTE: the expressions in the conditionals alone make these quite slow on
 --       32-bit machines, so don't worry about benchmarking this directly.
-_hash32_Int_64 :: (Hash h)=> h -> Int64 -> h
+_hash32_Int_64 :: (HashState h)=> h -> Int64 -> h
 {-# INLINE _hash32_Int_64 #-}
 _hash32_Int_64 h = \i->
     -- Can we losslessly cast to 32-bit representation?
@@ -670,7 +676,7 @@ _hash32_Int_64 h = \i->
         then hash h (fromIntegral i :: Int32)
         else hash h i
 
-_hash32_Word_64 :: (Hash h)=> h -> Word64 -> h
+_hash32_Word_64 :: (HashState h)=> h -> Word64 -> h
 {-# INLINE _hash32_Word_64 #-}
 _hash32_Word_64 h = \w->
     -- Can we losslessly cast to 32-bit representation?
@@ -742,10 +748,10 @@ instance Hashable Word64 where
 -- useful for multi-constructor types):
 
 -- > mixConstructor n h = h `mix8` (0xFF - n)
-mixConstructor :: (Hash h)
+mixConstructor :: (HashState h)
                => Word8  -- ^ Constructor number. We recommend starting from 0 and incrementing.
-               -> h      -- ^ Hash value to mix our byte into
-               -> h      -- ^ New hash value
+               -> h      -- ^ Hash state value to mix our byte into
+               -> h      -- ^ New hash state
 {-# INLINE mixConstructor #-}
 mixConstructor n = \h-> h `mix8` (0xFF - n)
 
@@ -968,7 +974,7 @@ instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f
 
 
 -- This is about twice as fast as a loop with single byte peeks:
-hashByteString :: (Hash h)=> h -> B.ByteString -> h
+hashByteString :: (HashState h)=> h -> B.ByteString -> h
 {-# INLINE hashByteString #-}
 hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
       withForeignPtr fp $ \base ->
@@ -1000,7 +1006,7 @@ hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
 -- NOTE: we can't simply call hashByteArray here; Text is stored as
 -- machine-endian UTF-16 (as promised by public Data.Text.Foreign), so we need
 -- to read Word16 here in order to hash as Big-Endian UTF-16.
-hashText :: (Hash h)=> h -> T.Text -> h
+hashText :: (HashState h)=> h -> T.Text -> h
 {-# INLINE hashText #-}
 hashText h = \(T.Text (T.Array ba_) off lenWord16) -> 
     let ba = P.ByteArray ba_
@@ -1028,7 +1034,7 @@ hashText h = \(T.Text (T.Array ba_) off lenWord16) ->
                  in hashRemainingWord16s (hAcc `mix16` w0) (ix+1)
      in hash4Word16sLoop h off 
 
-hashByteArray :: (Hash h)=> h -> Int -> P.ByteArray -> h
+hashByteArray :: (HashState h)=> h -> Int -> P.ByteArray -> h
 {-# INLINE hashByteArray #-}
 hashByteArray h !lenBytes ba = 
     let !bytesRem = lenBytes .&. 7         -- lenBytes `mod` 8
@@ -1082,7 +1088,7 @@ hashByteArray h !lenBytes ba =
 -- 7.8
 --   APPLIED TO (take 250 $ iterate (+1) (1::Word8))  8.938 μs  -- NOTE: in general, 7.8 seems to do poorly applying folds to this in the context of criterion benchmarks
 --   APPLIED TO ([1.. 250 :: Word8])                  846.5 ns
-hashFoldl' :: (Hashable a, Hash h)=> h -> [a] -> h
+hashFoldl' :: (Hashable a, HashState h)=> h -> [a] -> h
 -- hashFoldl' :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
 {-# INLINE hashFoldl' #-}
 hashFoldl' = foldl' (\h' a-> h' `hash` a)
@@ -1091,7 +1097,7 @@ hashFoldl' = foldl' (\h' a-> h' `hash` a)
 --   APPLIED TO ([1.. 250 :: Word8])                  675.6 ns
 -- 7.8
 --   APPLIED TO ([1.. 250 :: Word8])                  729.6 ns
-hashLeftUnfolded :: (Hashable a, Hash h)=> h -> [a] -> h
+hashLeftUnfolded :: (Hashable a, HashState h)=> h -> [a] -> h
 -- hashLeftUnfolded :: Word32 -> [Word8] -> Word32  -- NOTE: tested above w/ this monomorphic sig
 {-# INLINE hashLeftUnfolded #-}
 hashLeftUnfolded = go

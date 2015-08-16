@@ -22,6 +22,7 @@ import Data.Hashabler
 import qualified Data.Hashable as Their
 
 instance NFData FNV32 where rnf = rnf . fnv32 
+instance NFData Hash32 where rnf = rnf . hashWord32
 
 -- BASELINE for list instances: 
 -- a fused foldl' equivalent -- NOTE ~ 2x faster than Unfolded on 7.10
@@ -41,7 +42,7 @@ hash32Times iters =
 
 main :: IO ()
 main = do
-    let bs50 = B.pack $ replicate 50 1
+    let bs50 = B.pack $ replicate 48 1
         bs1000 = B.pack $ replicate 1000 1
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
         t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
@@ -87,8 +88,8 @@ main = do
      bgroup "compare" [
         bench "long Text, hashable" $ nf Their.hash allWordsText
       , bench "[Text], hashable" $  nf Their.hash allWordsListText
-      , bench "long Text, hashabler" $ nf (fnv32 . hashFNV32) allWordsText
-      , bench "[Text], hashabler" $  nf (fnv32 . hashFNV32) allWordsListText
+      , bench "long Text, hashabler" $ nf (hashWord32 . hashFNV32) allWordsText
+      , bench "[Text], hashabler" $  nf (hashWord32 . hashFNV32) allWordsListText
       -- TODO ByteString
       ],
      bgroup "dev" [
@@ -139,6 +140,7 @@ main = do
 
       , bgroup "hashFNV32 on array types" [
             bench "strict ByteString x50" $ nf hashFNV32 bs50 
+          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (0x0706050403020100, 0x0F0E0D0C0B0A0908)) bs50 -- TODO just testing
           -- ought to be same as above:
           , bench "trivial lazy ByteString x50" $ nf hashFNV32 bs50LazyTrivial
           , bench "Text x50" $ nf hashFNV32 t50
@@ -148,6 +150,7 @@ main = do
 
           , bench "ByteArray x1000" $ nf hashFNV32 ba1000
           , bench "strict ByteString x1000" $ nf hashFNV32 bs1000
+          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (0x0706050403020100, 0x0F0E0D0C0B0A0908)) bs1000 -- TODO just testing
           , bench "lazy ByteString x1000, in 20 chunks" $ nf hashFNV32 bs1000Lazy_by20Chunks
           , bench "Text x1000" $ nf hashFNV32 t1000
           , bench "lazy Text x1000, in 20 chunks" $ nf hashFNV32 t1000Lazy_by20Chunks

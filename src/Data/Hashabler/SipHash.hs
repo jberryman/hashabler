@@ -136,6 +136,7 @@ siphashForWord (SipState{ .. }) m = runIdentity $
                   inlen <- return $ inlen + mSize
                   return $ SipState{ .. }
   where
+    {-# INLINE mSizeBits #-}
     mSizeBits =
 #    if MIN_VERSION_base(4,7,0)
       finiteBitSize m
@@ -143,11 +144,14 @@ siphashForWord (SipState{ .. }) m = runIdentity $
       bitSize m
 #    endif
 
+    {-# INLINE mSize #-}
     mSize = case mSizeBits of  8 -> 1 ; 16 -> 2 ; 32 -> 4 ; 64 -> 8 ; _ -> error "Impossible size!"
 
+    {-# INLINE orMparts #-}
     orMparts mPart m = return $ 
         (mPart `unsafeShiftL` mSizeBits) .|. (fromIntegral m)
 
+    {-# INLINE sipMix #-}
     sipMix v0 v1 v2 v3 m = do
         v3 <- return $ v3 `xor` m
      -- for( i=0; i<cROUNDS; ++i ) SIPROUND;

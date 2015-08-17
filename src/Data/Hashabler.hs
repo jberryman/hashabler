@@ -20,29 +20,8 @@ module Data.Hashabler (
  -}
 
   -- * Hash Functions
+  -- | Hashes of different widths.
     Hash32(..), Hash64(..), Hash128(..)
-
-  -- ** Hashing with the FNV-1a algorithm
-  -- | The FNV-1a hash (see <http://www.isthe.com/chongo/tech/comp/fnv/>) is
-  -- a fast and extremely simple hashing algorithm with fairly good mixing
-  -- properties. Its simplicity makes it a good choice if you need to implement
-  -- the same hashing routines on multiple platforms e.g. to verify a hash
-  -- generated in JS on a web client with a hash stored on your server.
-  --
-  -- If you are hashing untrusted user data and are concerned with hash
-  -- flooding attacks, <#siphash consider SipHash instead>.
-  , hashFNV32
-  , hashFNV64
-  -- *** FNV-1a Internal Parameters
-  -- | Magic FNV primes:
-  , fnvPrime32
-  , fnvPrime64
-  -- | The arbitrary initial seed values for different output hash sizes. These
-  -- values are part of the spec, but there is nothing special about them;
-  -- supposedly, in terms of hash quality, any non-zero value seed should be
-  -- fine passed to 'hash':
-  , fnvOffsetBasis32
-  , fnvOffsetBasis64
   
   -- ** Hashing with the SipHash algorithm
 {- | 
@@ -56,6 +35,30 @@ module Data.Hashabler (
   , siphash64
   , siphash128
 
+  -- ** Hashing with the FNV-1a algorithm
+  -- | The FNV-1a hash (see <http://www.isthe.com/chongo/tech/comp/fnv/>) is
+  -- a fast and extremely simple hashing algorithm with fairly good mixing
+  -- properties. Its simplicity makes it a good choice if you need to implement
+  -- the same hashing routines on multiple platforms e.g. to verify a hash
+  -- generated in JS on a web client with a hash stored on your server.
+  --
+  -- If you are hashing untrusted user data and are concerned with hash
+  -- flooding attacks, <#siphash consider SipHash instead>; performance is
+  -- about the same in the current implementation.
+  , hashFNV32
+  , hashFNV64
+  -- *** FNV-1a Internal Parameters
+  -- | Magic FNV primes:
+  , fnvPrime32
+  , fnvPrime64
+  -- | The arbitrary initial seed values for different output hash sizes. These
+  -- values are part of the spec, but there is nothing special about them;
+  -- supposedly, in terms of hash quality, any non-zero value seed should be
+  -- fine passed to 'hash':
+  , fnvOffsetBasis32
+  , fnvOffsetBasis64
+
+
   -- * Hashable types
   , Hashable(..)
   -- ** Creating your own Hashable instances
@@ -68,15 +71,15 @@ module Data.Hashabler (
  For types with /a single constructor/, simply call 'hash' on each of the
  constructor's children, for instance:
 
- > instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
+ > instance (Hashable a, Hashable b, Hashable c) => Hashable (a, b, c) where
  >     hash h (a,b,c) = h `hash` a `hash` b `hash` c
 
- And when a type has multiple constructors you should additionally call
+ And when a type has /multiple constructors/ you should additionally call
  'mixConstructor' with a different argument for each constructor.
 
- > instance (Hashable a, Hashable b) => Hashable (Either a b) where
- >     hash h (Left a)  = mixConstructor 0 $ hash h a
- >     hash h (Right b) = mixConstructor 1 $ hash h b
+ > instance (Hashable a, Hashable b) => Hashable (Eithers a b) where
+ >     hash h (Lefts a0 a1)     = mixConstructor 0 (h `hash` a0 `hash` a1)
+ >     hash h (Rights b0 b1 b2) = mixConstructor 1 (h `hash` b0 `hash` b1 `hash` b2)
 
  In the future we may offer a way to derive instances like this automatically.
 -}

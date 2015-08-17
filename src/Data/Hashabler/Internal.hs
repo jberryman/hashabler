@@ -271,10 +271,9 @@ class Hashable a where
     --
     -- Implementations must ensure that, for the same data: 
     --    
-    --    - @Word16/32/64@ arguments passed into the methods of 'HashState',
-    --      and... 
+    -- - @Word16\/32\/64@ arguments passed into the methods of 'HashState', and...
     --
-    --    - the choice of @mix@ function itself...
+    -- - the choice of @mix@ function itself...
     --
     -- ...are consistent across architectures of different word size and
     -- endianness. For example do not define an instance which conditionally
@@ -747,7 +746,7 @@ instance Hashable Word64 where
 -- Since below have variable-length, we'll use this helper (which is also
 -- useful for multi-constructor types):
 
--- > mixConstructor n h = h `mix8` (0xFF - n)
+-- | > mixConstructor n h = h `mix8` (0xFF - n)
 mixConstructor :: (HashState h)
                => Word8  -- ^ Constructor number. We recommend starting from 0 and incrementing.
                -> h      -- ^ Hash state value to mix our byte into

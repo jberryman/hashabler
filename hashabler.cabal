@@ -1,12 +1,12 @@
 name:                hashabler
-version:             0.1.0.2
-synopsis:            Principled, cross-platform & extensible hashing of types, including an implementation of the FNV-1a algorithm.
+version:             1.0
+synopsis:            Principled, cross-platform & extensible hashing of types, including an implementation of the FNV-1a and SipHash algorithms.
 description:         
     This package is a rewrite of the @hashable@ library by Milan Straka and
     Johan Tibell, having the following goals:
     .
     - Extensibility; it should be easy to implement a new hashing algorithm on
-      any @Hashable@ type, for instance if one needed more hash bits
+      any @Hashable@ type; in this package we provide SipHash and FNV-1a.
     .
     - Honest hashing of values, and principled hashing of algebraic data types
       (see e.g. hashable issues #74 and #30)
@@ -16,11 +16,11 @@ description:
       regardless of processor word size and endianness.
     .
     - Make implementing identical hash routines in other languages as painless
-      as possible. We provide an implementation of a simple hashing algorithm
-      (FNV-1a) and make an effort to define Hashable instances in a way that is
-      well-documented and sensible, so that e.g. one can easily implement a
-      string hashing routine in JavaScript that will match the way we hash
-      strings here.
+      as possible. In addition to SipHash, we provide an implementation of a
+      simple hashing algorithm (FNV-1a) and make an effort to define Hashable
+      instances in a way that is well-documented and sensible, so that e.g. one
+      can easily implement a string hashing routine in JavaScript that will
+      match the way we hash strings here.
     .
     /Versioning/: Except for instances where we specifically note that we make
     no promise of consistency, changes to hash values entail a major version

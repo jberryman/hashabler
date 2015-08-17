@@ -23,6 +23,7 @@ import qualified Data.Hashable as Their
 
 instance NFData FNV32 where rnf = rnf . fnv32 
 instance NFData Hash32 where rnf = rnf . hashWord32
+instance NFData Hash64 where rnf = rnf . hashWord64
 
 -- BASELINE for list instances: 
 -- a fused foldl' equivalent -- NOTE ~ 2x faster than Unfolded on 7.10

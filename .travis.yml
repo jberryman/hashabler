@@ -21,5 +21,12 @@ matrix:
 before_install:
  - export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$PATH
 
+install:
+ - travis_retry cabal update
+ - sed -i 's/^jobs:/-- jobs:/' ${HOME}/.cabal/config
+ - cabal install --only-dependencies --enable-tests -fdev
+
 script:
- - cabal configure -fdev --enable-tests && cabal build && cabal test tests
+ - cabal configure -fdev --enable-tests 
+ - cabal build 
+ - cabal test tests

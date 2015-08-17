@@ -1,3 +1,5 @@
+# Hashabler [![Build Status](https://travis-ci.org/jberryman/hashabler.svg)](https://travis-ci.org/jberryman/hashabler) 
+
 This is a haskell library for principled, cross-platform & extensible hashing
 of types, which includes an implementation of the FNV-1a algorithm. It is a
 rewrite of the [hashable](http://hackage.haskell.org/package/hashable) library 

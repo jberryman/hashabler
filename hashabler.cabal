@@ -57,6 +57,8 @@ Flag integer-gmp
 Flag dev
   Description: To build tests, executables and benchmarks do `configure -fdev --enable-tests` and run the built executables by hand (i.e. not with `cabal test` etc.; we put all our different executables in test-suite sections in order to hide their dependencies from hackage)
   Default: False
+  -- TODO did this solve our issues with having executable sections and hackage deps?:
+  Manual: True
 
 library
   if flag(dev)
@@ -172,8 +174,9 @@ benchmark core
   else 
       buildable: False
 
-  ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
-  ghc-options: -O2  -rtsopts  
+  if flag(dev)
+      ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
+      ghc-options: -O2  -rtsopts  
  
   -- Either do threaded for eventlogging and simple timing...
   --ghc-options: -threaded -eventlog

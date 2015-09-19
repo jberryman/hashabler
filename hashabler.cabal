@@ -44,6 +44,7 @@ extra-source-files:  tests/Vectors/generated/*.in
                    , tests/Vectors/generated/*.ByteString.out.FNV32
                    , tests/Vectors/generated/P.ByteArray.out.FNV32
                    , tests/Vectors/generated/*.Text.out.FNV32
+                   , CHANGELOG.markdown
 
 source-repository head
   type:     git

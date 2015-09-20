@@ -166,7 +166,7 @@ siphashForWord (SipState{ .. }) m = runIdentity $
 --
 -- This function is fast on 64-bit machines, and provides very good hashing
 -- properties and protection against hash flooding attacks.
-siphash64 :: Hashable a => SipKey -> a -> Hash64
+siphash64 :: Hashable a => SipKey -> a -> Hash64 a
 {-# INLINE siphash64 #-}
 siphash64 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
@@ -214,7 +214,7 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
 --
 -- This function is fast on 64-bit machines, and provides very good hashing
 -- properties and protection against hash flooding attacks.
-siphash128 :: Hashable a => SipKey -> a -> Hash128
+siphash128 :: Hashable a => SipKey -> a -> Hash128 a
 {-# INLINE siphash128 #-}
 siphash128 (k0,k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575

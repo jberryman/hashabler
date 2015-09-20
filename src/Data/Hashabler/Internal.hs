@@ -240,11 +240,11 @@ castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
 
-newtype Hash32 = Hash32 { hashWord32 :: Word32 }
+newtype Hash32 a = Hash32 { hashWord32 :: Word32 }
     deriving (Show, Read, Eq)
-newtype Hash64 = Hash64 { hashWord64 :: Word64 }
+newtype Hash64 a = Hash64 { hashWord64 :: Word64 }
     deriving (Show, Read, Eq)
-data Hash128 = Hash128 { hashWord128_0 :: !Word64, hashWord128_1 :: !Word64 }
+data Hash128 a = Hash128 { hashWord128_0 :: !Word64, hashWord128_1 :: !Word64 }
     deriving (Show, Read, Eq)
 
 
@@ -370,7 +370,7 @@ instance HashState FNV32 where
 -- @
 --   hashFNV32 = 'Hash32' . fnv32 . 'hash' 'fnvOffsetBasis32'
 -- @
-hashFNV32 :: Hashable a=> a -> Hash32
+hashFNV32 :: Hashable a=> a -> Hash32 a
 {-# INLINE hashFNV32 #-}
 hashFNV32 = Hash32 . fnv32 . hash fnvOffsetBasis32
 
@@ -390,7 +390,7 @@ instance HashState FNV64 where
 -- @
 --   hashFNV64 = 'Hash64' . fnv64 . 'hash' 'fnvOffsetBasis64'
 -- @
-hashFNV64 :: Hashable a=> a -> Hash64
+hashFNV64 :: Hashable a=> a -> Hash64 a
 {-# INLINE hashFNV64 #-}
 hashFNV64 = Hash64 . fnv64 . hash fnvOffsetBasis64
 

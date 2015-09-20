@@ -20,7 +20,9 @@ module Data.Hashabler (
  -}
 
   -- * Hash Functions
-  -- | Hashes of different widths.
+  -- | Hashes of different widths. We tag these hash types with the types of
+  -- the data they were produced from so that e.g. we get a sensible 'Eq'
+  -- instance.
     Hash32(..), Hash64(..), Hash128(..)
   
   -- ** Hashing with the SipHash algorithm

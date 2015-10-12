@@ -1,9 +1,10 @@
 # Hashabler [![Build Status](https://travis-ci.org/jberryman/hashabler.svg)](https://travis-ci.org/jberryman/hashabler) 
 
 This is a haskell library for principled, cross-platform & extensible hashing
-of types, which includes an implementation of the FNV-1a algorithm. It is a
-rewrite of the [hashable](http://hackage.haskell.org/package/hashable) library 
-by Milan Straka and Johan Tibell, having the following goals:
+of data and types, which includes an implementation of the FNV-1a and SipHash
+algorithms. It is a rewrite of the
+[hashable](http://hackage.haskell.org/package/hashable) library by Milan Straka
+and Johan Tibell, having the following goals:
 
 - Extensibility; it should be easy to implement a new hashing algorithm on any
   Hashable type, for instance if one needed more hash bits
@@ -27,5 +28,5 @@ can be installed with:
     cabal install hashabler
 
 **Versioning**: Except for instances where we specifically note that we make no
-promise of consistency, changes to hash values entail a major version number
-bump.
+promise of consistency, changes to hash values (and consequently changes to
+`StableHashable` values, where applicable) entail a major version number bump.

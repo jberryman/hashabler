@@ -2,6 +2,8 @@
 ---
 * Parameterize `Hash32/64/128` types by the type of their hashed source data,
   to enforce legitimate equality comparisons of hashes.
+* Add `StableHashable` for distinguishing types with respect to their hashes
+  across platforms and programs.
 
 1.0
 ---

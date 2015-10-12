@@ -86,6 +86,10 @@ module Data.Hashabler (
  In the future we may offer a way to derive instances like this automatically.
 -}
   , mixConstructor
+
+
+  -- * Stable \"hashes\" of Types
+  , StableHashable(..), TypeHash(..), typeHashOf, typeHashOfProxy
   
   -- * Implementing new hash functions
   , HashState(..)

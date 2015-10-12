@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash , UnliftedFFITypes #-}
 module Data.Hashabler.Internal where
@@ -254,11 +256,12 @@ data Hash128 a = Hash128 { hashWord128_0 :: !Word64, hashWord128_1 :: !Word64 }
 --
 -- We try to ensure that bytes are extracted from values in a way that is
 -- portable across architectures (where possible), and straightforward to
--- replicate on other platforms and in other languages. Exceptions are
--- __NOTE__-ed in instance docs.
+-- replicate on other platforms and in other languages. Portable instances are
+-- also instances of 'StableHashable', and non-portable instances are
+-- __NOTE__-ed in instance docs here as well.
 --
--- See the section <#principled "Defining Hashable instances"> for details of what we expect
--- from instances.
+-- See the section <#principled "Defining Hashable instances"> for details of
+-- what we expect from instances.
 class Hashable a where
     -- | Add the bytes from the second argument into the hash, producing a new
     -- hash value. This is essentially a left fold of the methods of
@@ -305,7 +308,7 @@ class HashState h where
     -- most to least significant.
     mix64 :: h -> Word64 -> h
 
-    -- Hash functions are likely to take individually bytes, or chunks of 32 or
+    -- Hash functions are likely to take individual bytes, or chunks of 32 or
     -- 64 bits, so I think these defaults make sense.
     {-# INLINE mix16 #-}
     mix16 h = \wd16-> 
@@ -855,13 +858,15 @@ typeRepInt32 =
 instance Hashable (StableName a) where
     {-# INLINE hash #-}
     hash h = \x-> hash h $ hashStableName x
-    
+
 -- | The (now deprecated) @versionTags@ field is ignored, and we follow the
 -- 'Eq' instance which does not ignore trailing zeros.
 instance Hashable Version where
     {-# INLINE hash #-}
     hash h = \x-> hash h $ versionBranch x
 
+-- | __NOTE__: No promise of stability across runs or platforms. Implemented via
+-- 'hashUnique'.
 instance Hashable Unique where
     {-# INLINE hash #-}
     hash h = \x-> hash h $ hashUnique x
@@ -893,7 +898,7 @@ instance Hashable a => Hashable (Maybe a) where
     {-# INLINE hash #-}
     hash h Nothing  = mixConstructor 0 h
     hash h (Just a) = mixConstructor 1 $ hash h a
-        
+
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
     {-# INLINE hash #-}
     hash h = either (mx 0) (mx 1) where
@@ -915,7 +920,7 @@ instance Hashable () where
 instance (Hashable a1, Hashable a2) => Hashable (a1, a2) where
     {-# INLINE hash #-}
     hash h (a,b) = h `hash` a `hash` b
-    
+
 instance (Hashable a1, Hashable a2, Hashable a3) => Hashable (a1, a2, a3) where
     {-# INLINE hash #-}
     hash h (a,b,c) = h `hash` a `hash` b `hash` c
@@ -967,6 +972,150 @@ instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f
 instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h, Hashable i, Hashable j, Hashable k, Hashable l, Hashable m, Hashable n, Hashable o)=> Hashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) where
     {-# INLINE hash #-}
     hash hsh (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) = hsh `hash` a `hash` b `hash` c `hash` d `hash` e `hash` f `hash` g `hash` h `hash` i `hash` j `hash` k `hash` l `hash` m `hash` n `hash` o
+
+
+
+-- | A value that uniquely identifies a 'StableHashable' type. This serves to
+-- both version a type with respect to its 'Hashable' instance, and distinguish
+-- types from each other (similar to 'TypeRep') across program runs, platforms
+-- and library versions.
+newtype TypeHash a = TypeHash { typeHashWord :: Word64 }
+    deriving (Eq, Read, Show, Bits, FiniteBits)
+
+-- > typeHashOf _ = typeHash
+typeHashOf :: StableHashable a=> a -> TypeHash a
+typeHashOf _ = typeHash
+
+-- > typeHashOfProxy _ = typeHash
+typeHashOfProxy :: StableHashable a=> proxy a -> TypeHash a
+typeHashOfProxy _ = typeHash
+
+-- | Types whose hashes can be compared across platforms. This is somewhat like
+-- a limited, but cross-platform 'Typeable'.
+--
+-- Instances are expected to be universally-unique, and should be generated
+-- randomly. Type parameters can be hashed together using 'xor', like:
+--
+-- > instance (StableHashable b) => StableHashable (A b) where
+-- >     typeHash = TypeHash $ 530184177609460980  `xor` (typeHashWord (typeHash :: TypeHash b))
+--
+-- When 'Hashable' instances change, the 'TypeHash' must be changed to a new
+-- random value. This lets us \"version\" a set of hashes; if we store a
+-- 'TypeHash' along with a set of hashes in program /A/, in program /B/ we can
+-- compare the stored value with our own 'TypeHash' and verify that hashes we
+-- generate in program /B/ can be meaningfully compared.
+--
+-- Note, obviously this doesn't ensure that values were hashed with the same
+-- hashing algorithm, and you should come up with your own means to serialize
+-- that information if you need to.
+class Hashable a=> StableHashable a where
+    typeHash :: TypeHash a
+
+-- | The value here depends on whether we're on a 32 or 64-bit platform. See
+-- also the instance documentation for 'Hashable'.
+instance StableHashable Int where
+#  if WORD_SIZE_IN_BITS == 32
+    typeHash = TypeHash 14906715774445347101
+#  else
+    typeHash = TypeHash 13382803217769822997
+#  endif
+-- | The value here depends on whether we're on a 32 or 64-bit platform. See
+-- also the instance documentation for 'Hashable'.
+instance StableHashable Word where
+#  if WORD_SIZE_IN_BITS == 32
+    typeHash = TypeHash 10996918434311873249
+#  else
+    typeHash = TypeHash 943142231655442729
+#  endif
+
+instance StableHashable Integer where
+    typeHash = TypeHash $ 96690694942656444
+instance StableHashable BigNat where
+    typeHash = TypeHash $ 2111364012200171327
+instance StableHashable Natural where
+    typeHash = TypeHash $ 11915819290390802320
+instance StableHashable Void where
+    typeHash = TypeHash $ 13639848524738715571
+instance (Integral a, StableHashable a) => StableHashable (Ratio a) where
+    typeHash = TypeHash $ 330184177609460989  `xor` (typeHashWord (typeHash :: TypeHash a))
+instance StableHashable Float where
+    typeHash = TypeHash $ 7785239337948379302
+instance StableHashable Double where
+    typeHash = TypeHash $ 12403185125095650454
+instance StableHashable Int8 where
+    typeHash = TypeHash $ 17471749136236681265
+instance StableHashable Int16 where
+    typeHash = TypeHash $ 14440046210595456836
+instance StableHashable Int32 where
+    typeHash = TypeHash $ 13431688382274668720
+instance StableHashable Int64 where
+    typeHash = TypeHash $ 14806970576519879451
+instance StableHashable Word8 where
+    typeHash = TypeHash $ 6643259480050182665
+instance StableHashable Word16 where
+    typeHash = TypeHash $ 3765569608911963661
+instance StableHashable Word32 where
+    typeHash = TypeHash $ 6402686280864807547
+instance StableHashable Word64 where
+    typeHash = TypeHash $ 14652873008202722152
+instance StableHashable B.ByteString where
+    typeHash = TypeHash $ 171314019417081845
+instance StableHashable BL.ByteString where
+    typeHash = TypeHash $ 10099361054646539018
+instance StableHashable BSh.ShortByteString where
+    typeHash = TypeHash $ 15680327781389053206
+instance StableHashable T.Text where
+    typeHash = TypeHash $ 14746544807555826150
+instance StableHashable TL.Text where
+    typeHash = TypeHash $ 10657741718622626930
+instance StableHashable P.ByteArray where
+    typeHash = TypeHash $ 9976019413528454024
+instance StableHashable Char where
+    typeHash = TypeHash $ 4949001641339870281
+instance StableHashable Version where
+    typeHash = TypeHash $ 702645064027678737
+instance StableHashable Bool where
+    typeHash = TypeHash $ 2172478990419421580
+instance StableHashable Ordering where
+    typeHash = TypeHash $ 9293112338546135338
+instance StableHashable a => StableHashable [a] where
+    typeHash = TypeHash $ 8959911929979074606  `xor` (typeHashWord (typeHash :: TypeHash a))
+instance StableHashable a => StableHashable (Maybe a) where
+    typeHash = TypeHash $ 17404804613103585388  `xor` (typeHashWord (typeHash :: TypeHash a))
+instance (StableHashable a, StableHashable b) => StableHashable (Either a b) where
+    typeHash = TypeHash $ 2275317158072284048  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b))
+instance StableHashable () where
+    typeHash = TypeHash $ 6095166973227743591
+instance (StableHashable a, StableHashable b) => StableHashable (a, b) where
+    typeHash = TypeHash $ 12071780118071628513  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b))
+instance (StableHashable a, StableHashable b, StableHashable c) => StableHashable (a, b, c) where
+    typeHash = TypeHash $ 4618299809208311661  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d) => StableHashable (a, b, c, d) where
+    typeHash = TypeHash $ 2134528412514930125  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e) => StableHashable (a, b, c, d, e) where
+    typeHash = TypeHash $ 6145113094462899758  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f) => StableHashable (a, b, c, d, e, f) where
+    typeHash = TypeHash $ 44771254230381456  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g) => StableHashable (a, b, c, d, e, f, g) where
+    typeHash = TypeHash $ 9917360176431723073  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h) => StableHashable (a, b, c, d, e, f, g, h) where
+    typeHash = TypeHash $ 2303481052083416811  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i)=> StableHashable (a, b, c, d, e, f, g, h, i) where
+    typeHash = TypeHash $ 6307505215888440984  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j)=> StableHashable (a, b, c, d, e, f, g, h, i, j) where
+    typeHash = TypeHash $ 16862409449834578942  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k) where
+    typeHash = TypeHash $ 12571504671032409264  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l) where
+    typeHash = TypeHash $ 18057402240390888799  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l, StableHashable m)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l, m) where
+    typeHash = TypeHash $ 1509508551579382043  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l)) `xor` (typeHashWord (typeHash :: TypeHash m))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l, StableHashable m, StableHashable n)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n) where
+    typeHash = TypeHash $ 17220521008040723494  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l)) `xor` (typeHashWord (typeHash :: TypeHash m)) `xor` (typeHashWord (typeHash :: TypeHash n))
+instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l, StableHashable m, StableHashable n, StableHashable o)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) where
+    typeHash = TypeHash $ 17803228377227705691  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l)) `xor` (typeHashWord (typeHash :: TypeHash m)) `xor` (typeHashWord (typeHash :: TypeHash n)) `xor` (typeHashWord (typeHash :: TypeHash o))
+
+
 
 -- WISHLIST:
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.

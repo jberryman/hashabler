@@ -980,7 +980,7 @@ instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f
 -- types from each other (similar to 'TypeRep') across program runs, platforms
 -- and library versions.
 newtype TypeHash a = TypeHash { typeHashWord :: Word64 }
-    deriving (Eq, Read, Show, Bits, FiniteBits)
+    deriving (Eq, Read, Show, Bits)
 
 -- > typeHashOf _ = typeHash
 typeHashOf :: StableHashable a=> a -> TypeHash a
@@ -1030,12 +1030,20 @@ instance StableHashable Word where
 
 instance StableHashable Integer where
     typeHash = TypeHash $ 96690694942656444
+
+#ifdef MIN_VERSION_integer_gmp
+# if MIN_VERSION_integer_gmp(1,0,0)
 instance StableHashable BigNat where
     typeHash = TypeHash $ 2111364012200171327
+# endif
+#endif
+#if MIN_VERSION_base(4,8,0)
 instance StableHashable Natural where
     typeHash = TypeHash $ 11915819290390802320
 instance StableHashable Void where
     typeHash = TypeHash $ 13639848524738715571
+#endif
+
 instance (Integral a, StableHashable a) => StableHashable (Ratio a) where
     typeHash = TypeHash $ 330184177609460989  `xor` (typeHashWord (typeHash :: TypeHash a))
 instance StableHashable Float where
@@ -1062,8 +1070,10 @@ instance StableHashable B.ByteString where
     typeHash = TypeHash $ 171314019417081845
 instance StableHashable BL.ByteString where
     typeHash = TypeHash $ 10099361054646539018
+#if MIN_VERSION_bytestring(0,10,4)
 instance StableHashable BSh.ShortByteString where
     typeHash = TypeHash $ 15680327781389053206
+#endif
 instance StableHashable T.Text where
     typeHash = TypeHash $ 14746544807555826150
 instance StableHashable TL.Text where

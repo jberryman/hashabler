@@ -107,6 +107,12 @@ checkVectors = do
         unless (null failures) $
             print failures >> error "Got some failures in checkGeneratedVectors!"
 
+
+untag64 :: Hash64 a -> Hash64 b
+untag64 (Hash64 x) = Hash64 x
+untag32 :: Hash32 a -> Hash32 b
+untag32 (Hash32 x) = Hash32 x
+
 -- check all codepaths in siphash 'hash' instance, and make sure we're not
 -- dropping any input bytes in some way. Sufficient to check siphash64 here, as
 -- all share the Hash instance implementation.
@@ -127,26 +133,27 @@ checkSiphashSanity = test "SipHash sanity" $ do
                , 0x08091011FF131415 , 0x0809101112FF1415 , 0x080910111213FF15 , 0x08091011121314FF ] :: [Word64]
 
         uniqueHashes = concat [
-                [siphash64 siphashKey (w8,w64) | w8 <- w8s, w64 <- w64s ]
-              , [siphash64 siphashKey (w16,w64) | w16 <- w16s,w64 <- w64s ]
-              , [siphash64 siphashKey (w16,w8,w64) | w16 <- w16s,w8 <- w8s,w64 <- w64s ]
-              , [siphash64 siphashKey (w32,w64) | w32 <- w32s,w64 <- w64s ]
-              , [siphash64 siphashKey (w8,w32,w64) | w8 <- w8s,w32 <- w32s,w64 <- w64s ]
-              , [siphash64 siphashKey (w8,w32,w32) | w8 <- w8s,w32 <- w32s ]
-              , [siphash64 siphashKey (w32,w16,w64) | w32 <- w32s,w16 <- w16s,w64 <- w64s ]
-              , [siphash64 siphashKey (w32,w16,w32) | w32 <- w32s,w16 <- w16s ]
-              , [siphash64 siphashKey (w8,w16,w32,w64) | w8 <- w8s,w16 <- w16s,w32 <- w32s,w64 <- w64s ]
-              , [siphash64 siphashKey (w8,w16,w32,w32) | w8 <- w8s,w16 <- w16s,w32 <- w32s ]
-              , [siphash64 siphashKey (w8,w16,w32,w16) | w8 <- w8s,w32 <- w32s,w16 <- w16s ]
+                map untag64 [siphash64 siphashKey (w8,w64) | w8 <- w8s, w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w16,w64) | w16 <- w16s,w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w16,w8,w64) | w16 <- w16s,w8 <- w8s,w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w32,w64) | w32 <- w32s,w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w8,w32,w64) | w8 <- w8s,w32 <- w32s,w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w8,w32,w32) | w8 <- w8s,w32 <- w32s ]
+              , map untag64 [siphash64 siphashKey (w32,w16,w64) | w32 <- w32s,w16 <- w16s,w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w32,w16,w32) | w32 <- w32s,w16 <- w16s ]
+              , map untag64 [siphash64 siphashKey (w8,w16,w32,w64) | w8 <- w8s,w16 <- w16s,w32 <- w32s,w64 <- w64s ]
+              , map untag64 [siphash64 siphashKey (w8,w16,w32,w32) | w8 <- w8s,w16 <- w16s,w32 <- w32s ]
+              , map untag64 [siphash64 siphashKey (w8,w16,w32,w16) | w8 <- w8s,w32 <- w32s,w16 <- w16s ]
               ]
 
         identicalHashes = [
-              siphash64 siphashKey (0x01 :: Word8, 0x02 :: Word8, 0x03 :: Word8, 0x04 :: Word8, 0x05 :: Word8, 0x06 :: Word8, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
-            , siphash64 siphashKey (0x0102 :: Word16, 0x03 :: Word8, 0x04 :: Word8, 0x0506 :: Word16, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
-            , siphash64 siphashKey (0x01 :: Word8, 0x02030405 :: Word32, 0x06 :: Word8, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
-            , siphash64 siphashKey (0x01020304 :: Word32, 0x05060708 :: Word32,   0xDEADBEED :: Word32)
-            , siphash64 siphashKey (0x0102030405060708 :: Word64,   0xDEADBEED :: Word32)
+              untag64 $ siphash64 siphashKey (0x01 :: Word8, 0x02 :: Word8, 0x03 :: Word8, 0x04 :: Word8, 0x05 :: Word8, 0x06 :: Word8, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
+            , untag64 $ siphash64 siphashKey (0x0102 :: Word16, 0x03 :: Word8, 0x04 :: Word8, 0x0506 :: Word16, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
+            , untag64 $ siphash64 siphashKey (0x01 :: Word8, 0x02030405 :: Word32, 0x06 :: Word8, 0x07 :: Word8, 0x08 :: Word8,   0xDEADBEED :: Word32)
+            , untag64 $ siphash64 siphashKey (0x01020304 :: Word32, 0x05060708 :: Word32,   0xDEADBEED :: Word32)
+            , untag64 $ siphash64 siphashKey (0x0102030405060708 :: Word64,   0xDEADBEED :: Word32)
             ]
+
 
 -- Helpers for below:
 bytesFloat :: Float -> (Word8,Word8,Word8,Word8)
@@ -176,8 +183,8 @@ checkMiscUnitTests = do
               error $ "bytesDouble: "++(show dbl)++" /= "++(show dblBytes)
 
     test "Bool" $
-        unless (hashFNV32 (fromBool True :: Word8) == hashFNV32 True
-               && hashFNV32 (fromBool False :: Word8) == hashFNV32 False) $
+        unless (hashFNV32 (fromBool True :: Word8) == (untag32 $ hashFNV32 True)
+               && hashFNV32 (fromBool False :: Word8) == (untag32 $ hashFNV32 False)) $
              error "Bool instance not sensible"
 
 
@@ -223,31 +230,31 @@ checkHashableInstances = do
                  == (Hash32 $ mixConstructorFNV32 signByte $ hashWord32
                       (if magWord64 > fromIntegral (maxBound :: Word32)
                           then hashFNV32 magWord64
-                          else hashFNV32 (fromIntegral magWord64 :: Word32))
+                          else untag32 $ hashFNV32 (fromIntegral magWord64 :: Word32))
                       )
 
     -- FNV32 test vectors provide basic sanity for word/int instances. Here
     -- just make sure Word and Int types are equivalent.
     quickCheckErr 1000 $
         \(Large word8)-> let int8 = fromIntegral (word8 :: Word8) :: Int8
-                          in hashFNV32 word8 == hashFNV32 int8
+                          in hashFNV32 word8 == (untag32 $ hashFNV32 int8)
     quickCheckErr 1000 $
         \(Large word16)-> let int16 = fromIntegral (word16 :: Word16) :: Int16
-                           in hashFNV32 word16 == hashFNV32 int16
+                           in hashFNV32 word16 == (untag32 $ hashFNV32 int16)
     quickCheckErr 1000 $
         \(Large word32)-> let int32 = fromIntegral (word32 :: Word32) :: Int32
-                           in hashFNV32 word32 == hashFNV32 int32
+                           in hashFNV32 word32 == (untag32 $ hashFNV32 int32)
     quickCheckErr 1000 $
         \(Large word64)-> let int64 = fromIntegral (word64 :: Word64) :: Int64
-                           in hashFNV32 word64 == hashFNV32 int64
+                           in hashFNV32 word64 == (untag32 $ hashFNV32 int64)
     -- And for machine-dependenat Word/Int check equivalence to Int/Word32 when
     -- in 32-bit range, else (only relevant on 64-bit machines) to Int/Word64:
     quickCheckErr 1000 $
         \(Large word)->
             hashFNV32 (word :: Word)
                  == (if word > fromIntegral (maxBound :: Word32)
-                        then hashFNV32 (fromIntegral word :: Int64)
-                        else hashFNV32 (fromIntegral word :: Int32))
+                        then untag32 $ hashFNV32 (fromIntegral word :: Int64)
+                        else untag32 $ hashFNV32 (fromIntegral word :: Int32))
 
 #  if MIN_VERSION_base(4,8,0)
     -- Check documented 32-bit chunked, big-endian order hashing of Natural:
@@ -257,7 +264,7 @@ checkHashableInstances = do
                   testSane = (length bytesBE) `mod` 4 == 0
                in testSane &&
                    (hashFNV32 nat) == 
-                   (hashFNV32 bytesBE) -- against instance [Word8]
+                   (untag32 $ hashFNV32 bytesBE) -- against instance [Word8]
                       
         flip forAll checkNat $ do
             let maxWidth = 100 -- nibbles
@@ -276,7 +283,7 @@ checkHashableInstances = do
                   bsStrict = B.pack wd8s
                   bsLazyChunked = BL.fromChunks $ map B.pack $ chunk chunkSize wd8s
                in (hashFNV32 bsStrict) ==
-                  (hashFNV32 bsLazyChunked)
+                  (untag32 $ hashFNV32 bsLazyChunked)
         flip forAll checkBS $ do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
@@ -290,7 +297,7 @@ checkHashableInstances = do
                   bsStrict = T.pack cs
                   bsLazyChunked = TL.fromChunks $ map T.pack $ chunk chunkSize cs
                in (hashFNV32 bsStrict) ==
-                  (hashFNV32 bsLazyChunked)
+                  (untag32 $ hashFNV32 bsLazyChunked)
         flip forAll checkBS $ do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
@@ -305,7 +312,7 @@ checkHashableInstances = do
                   bsStrict = B.pack wd8s
                   bsShort  = BSh.pack wd8s
                in (hashFNV32 bsStrict) ==
-                  (hashFNV32 bsShort)
+                  (untag32 $ hashFNV32 bsShort)
         flip forAll checkBS $ do
             let maxBytes = 1000*1000
             growingElements [1..maxBytes]
@@ -317,7 +324,7 @@ checkHashableInstances = do
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
                in (hashFNV32 bsStrict) ==
-                  (hashFNV32 wd8s)
+                  (untag32 $ hashFNV32 wd8s)
         flip forAll checkBS $ do
             let maxBytes = 1000*1000
             growingElements [1..maxBytes]
@@ -328,7 +335,7 @@ checkHashableInstances = do
               let wd8s = take bs $ iterate (+1) 0
                   byteArr = packByteArray wd8s
                in (hashFNV32 byteArr) ==
-                  (hashFNV32 wd8s)
+                  (untag32 $ hashFNV32 wd8s)
         flip forAll checkBA $ do
             let maxBytes = 1000*1000
             growingElements [1..maxBytes]
@@ -342,7 +349,7 @@ checkHashableInstances = do
                   b = B.take takeVal $ B.drop dropVal $ B.pack wd8s
                   l =   take takeVal $   drop dropVal $        wd8s
                in (hashFNV32 b) ==
-                  (hashFNV32 l)
+                  (untag32 $ hashFNV32 l)
         flip forAll checkBS $ do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
@@ -358,7 +365,7 @@ checkHashableInstances = do
               let t = T.pack $ map (toEnum . clean . getLarge) largeCs
                   clean = (`mod` fromEnum (maxBound :: Char))
                   bs = T.encodeUtf16BE t
-               in (hashFNV32 t) == (hashFNV32 bs)
+               in (hashFNV32 t) == (untag32 $ hashFNV32 bs)
         flip forAll checkBS $ do
             let maxChars = 1000
             w <- growingElements [1..maxChars]
@@ -375,7 +382,7 @@ checkHashableInstances = do
     -- code points:
     quickCheckErr 1000 $ \sDirty -> 
         let s = map T.safe sDirty
-         in (hashFNV32 $ T.pack s) == hashFNV32 s
+         in (hashFNV32 $ T.pack s) == (untag32 $ hashFNV32 s)
 
     -- checking collisions in an ad hoc way; we especially care about our sum
     -- types with fixed shape. TODO improve; also this is slower than necessary

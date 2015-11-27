@@ -4,6 +4,8 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE MagicHash , UnliftedFFITypes #-}
+-- For mixType:
+{-# LANGUAGE KindSignatures, PolyKinds #-}
 module Data.Hashabler.Internal where
 
 -- To avoid circular dependencies.
@@ -975,11 +977,26 @@ instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f
 
 
 
+
+-- | A helper for implementing 'typeHash' by 'xor'-ing type parameters with a
+-- new random hash value. E.g.:
+--
+-- @
+--  instance (StableHashable a, StableHashable b) => StableHashable (a, b) where
+--      typeHash = mixType (mixType (TypeHash 12071780118071628513))
+--                   \         \                \__ a new random value for (,)
+--                    \         \____ mix in the type hash for 'a'
+--                     \__ mix in the type hash for 'b'
+-- @
+mixType :: forall a t. StableHashable a=> TypeHash t -> TypeHash (t a)
+mixType (TypeHash t)= TypeHash (t `xor` (typeHashWord (typeHash :: TypeHash a)))
+
+
 -- | A value that uniquely identifies a 'StableHashable' type. This serves to
 -- both version a type with respect to its 'Hashable' instance, and distinguish
 -- types from each other (similar to 'TypeRep') across program runs, platforms
 -- and library versions.
-newtype TypeHash a = TypeHash { typeHashWord :: Word64 }
+newtype TypeHash (a :: k) = TypeHash { typeHashWord :: Word64 }
     deriving (Eq, Read, Show, Bits)
 
 -- > typeHashOf _ = typeHash
@@ -994,10 +1011,10 @@ typeHashOfProxy _ = typeHash
 -- a limited, but cross-platform 'Typeable'.
 --
 -- Instances are expected to be universally-unique, and should be generated
--- randomly. Type parameters can be hashed together using 'xor', like:
+-- randomly. Type parameters can be hashed together using 'mixType', like:
 --
 -- > instance (StableHashable b) => StableHashable (A b) where
--- >     typeHash = TypeHash $ 530184177609460980  `xor` (typeHashWord (typeHash :: TypeHash b))
+-- >     typeHash = mixType (TypeHash 530184177609460980)
 --
 -- When 'Hashable' instances change, the 'TypeHash' must be changed to a new
 -- random value. This lets us \"version\" a set of hashes; if we store a
@@ -1029,101 +1046,101 @@ instance StableHashable Word where
 #  endif
 
 instance StableHashable Integer where
-    typeHash = TypeHash $ 96690694942656444
+    typeHash = TypeHash 96690694942656444
 
 #ifdef MIN_VERSION_integer_gmp
 # if MIN_VERSION_integer_gmp(1,0,0)
 instance StableHashable BigNat where
-    typeHash = TypeHash $ 2111364012200171327
+    typeHash = TypeHash 2111364012200171327
 # endif
 #endif
 #if MIN_VERSION_base(4,8,0)
 instance StableHashable Natural where
-    typeHash = TypeHash $ 11915819290390802320
+    typeHash = TypeHash 11915819290390802320
 instance StableHashable Void where
-    typeHash = TypeHash $ 13639848524738715571
+    typeHash = TypeHash 13639848524738715571
 #endif
 
 instance (Integral a, StableHashable a) => StableHashable (Ratio a) where
-    typeHash = TypeHash $ 330184177609460989  `xor` (typeHashWord (typeHash :: TypeHash a))
+    typeHash = mixType (TypeHash 330184177609460989)
 instance StableHashable Float where
-    typeHash = TypeHash $ 7785239337948379302
+    typeHash = TypeHash 7785239337948379302
 instance StableHashable Double where
-    typeHash = TypeHash $ 12403185125095650454
+    typeHash = TypeHash 12403185125095650454
 instance StableHashable Int8 where
-    typeHash = TypeHash $ 17471749136236681265
+    typeHash = TypeHash 17471749136236681265
 instance StableHashable Int16 where
-    typeHash = TypeHash $ 14440046210595456836
+    typeHash = TypeHash 14440046210595456836
 instance StableHashable Int32 where
-    typeHash = TypeHash $ 13431688382274668720
+    typeHash = TypeHash 13431688382274668720
 instance StableHashable Int64 where
-    typeHash = TypeHash $ 14806970576519879451
+    typeHash = TypeHash 14806970576519879451
 instance StableHashable Word8 where
-    typeHash = TypeHash $ 6643259480050182665
+    typeHash = TypeHash 6643259480050182665
 instance StableHashable Word16 where
-    typeHash = TypeHash $ 3765569608911963661
+    typeHash = TypeHash 3765569608911963661
 instance StableHashable Word32 where
-    typeHash = TypeHash $ 6402686280864807547
+    typeHash = TypeHash 6402686280864807547
 instance StableHashable Word64 where
-    typeHash = TypeHash $ 14652873008202722152
+    typeHash = TypeHash 14652873008202722152
 instance StableHashable B.ByteString where
-    typeHash = TypeHash $ 171314019417081845
+    typeHash = TypeHash 171314019417081845
 instance StableHashable BL.ByteString where
-    typeHash = TypeHash $ 10099361054646539018
+    typeHash = TypeHash 10099361054646539018
 #if MIN_VERSION_bytestring(0,10,4)
 instance StableHashable BSh.ShortByteString where
-    typeHash = TypeHash $ 15680327781389053206
+    typeHash = TypeHash 15680327781389053206
 #endif
 instance StableHashable T.Text where
-    typeHash = TypeHash $ 14746544807555826150
+    typeHash = TypeHash 14746544807555826150
 instance StableHashable TL.Text where
-    typeHash = TypeHash $ 10657741718622626930
+    typeHash = TypeHash 10657741718622626930
 instance StableHashable P.ByteArray where
-    typeHash = TypeHash $ 9976019413528454024
+    typeHash = TypeHash 9976019413528454024
 instance StableHashable Char where
-    typeHash = TypeHash $ 4949001641339870281
+    typeHash = TypeHash 4949001641339870281
 instance StableHashable Version where
-    typeHash = TypeHash $ 702645064027678737
+    typeHash = TypeHash 702645064027678737
 instance StableHashable Bool where
-    typeHash = TypeHash $ 2172478990419421580
+    typeHash = TypeHash 2172478990419421580
 instance StableHashable Ordering where
-    typeHash = TypeHash $ 9293112338546135338
+    typeHash = TypeHash 9293112338546135338
 instance StableHashable a => StableHashable [a] where
-    typeHash = TypeHash $ 8959911929979074606  `xor` (typeHashWord (typeHash :: TypeHash a))
+    typeHash = mixType (TypeHash 8959911929979074606)
 instance StableHashable a => StableHashable (Maybe a) where
-    typeHash = TypeHash $ 17404804613103585388  `xor` (typeHashWord (typeHash :: TypeHash a))
+    typeHash = mixType (TypeHash 17404804613103585388)
 instance (StableHashable a, StableHashable b) => StableHashable (Either a b) where
-    typeHash = TypeHash $ 2275317158072284048  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b))
+    typeHash = mixType (TypeHash 2275317158072284048)
 instance StableHashable () where
-    typeHash = TypeHash $ 6095166973227743591
+    typeHash = TypeHash 6095166973227743591
 instance (StableHashable a, StableHashable b) => StableHashable (a, b) where
-    typeHash = TypeHash $ 12071780118071628513  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b))
+    typeHash = mixType $ mixType (TypeHash 12071780118071628513)
 instance (StableHashable a, StableHashable b, StableHashable c) => StableHashable (a, b, c) where
-    typeHash = TypeHash $ 4618299809208311661  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c))
+    typeHash = mixType $ mixType $ (TypeHash 4618299809208311661)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d) => StableHashable (a, b, c, d) where
-    typeHash = TypeHash $ 2134528412514930125  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d))
+    typeHash = mixType $mixType $mixType $   (TypeHash 2134528412514930125)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e) => StableHashable (a, b, c, d, e) where
-    typeHash = TypeHash $ 6145113094462899758  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e))
+    typeHash = mixType $mixType $mixType $mixType $    (TypeHash 6145113094462899758)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f) => StableHashable (a, b, c, d, e, f) where
-    typeHash = TypeHash $ 44771254230381456  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f))
+    typeHash = mixType $mixType $mixType $mixType $mixType $     (TypeHash 44771254230381456)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g) => StableHashable (a, b, c, d, e, f, g) where
-    typeHash = TypeHash $ 9917360176431723073  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $      (TypeHash 9917360176431723073)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h) => StableHashable (a, b, c, d, e, f, g, h) where
-    typeHash = TypeHash $ 2303481052083416811  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $       (TypeHash 2303481052083416811)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i)=> StableHashable (a, b, c, d, e, f, g, h, i) where
-    typeHash = TypeHash $ 6307505215888440984  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $        (TypeHash 6307505215888440984)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j)=> StableHashable (a, b, c, d, e, f, g, h, i, j) where
-    typeHash = TypeHash $ 16862409449834578942  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $         (TypeHash 16862409449834578942)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k) where
-    typeHash = TypeHash $ 12571504671032409264  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $          (TypeHash 12571504671032409264)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l) where
-    typeHash = TypeHash $ 18057402240390888799  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $           (TypeHash 18057402240390888799)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l, StableHashable m)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l, m) where
-    typeHash = TypeHash $ 1509508551579382043  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l)) `xor` (typeHashWord (typeHash :: TypeHash m))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $            (TypeHash 1509508551579382043)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l, StableHashable m, StableHashable n)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n) where
-    typeHash = TypeHash $ 17220521008040723494  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l)) `xor` (typeHashWord (typeHash :: TypeHash m)) `xor` (typeHashWord (typeHash :: TypeHash n))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $             (TypeHash 17220521008040723494)
 instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d, StableHashable e, StableHashable f, StableHashable g, StableHashable h, StableHashable i, StableHashable j, StableHashable k, StableHashable l, StableHashable m, StableHashable n, StableHashable o)=> StableHashable (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) where
-    typeHash = TypeHash $ 17803228377227705691  `xor` (typeHashWord (typeHash :: TypeHash a)) `xor` (typeHashWord (typeHash :: TypeHash b)) `xor` (typeHashWord (typeHash :: TypeHash c)) `xor` (typeHashWord (typeHash :: TypeHash d)) `xor` (typeHashWord (typeHash :: TypeHash e)) `xor` (typeHashWord (typeHash :: TypeHash f)) `xor` (typeHashWord (typeHash :: TypeHash g)) `xor` (typeHashWord (typeHash :: TypeHash h)) `xor` (typeHashWord (typeHash :: TypeHash i)) `xor` (typeHashWord (typeHash :: TypeHash j)) `xor` (typeHashWord (typeHash :: TypeHash k)) `xor` (typeHashWord (typeHash :: TypeHash l)) `xor` (typeHashWord (typeHash :: TypeHash m)) `xor` (typeHashWord (typeHash :: TypeHash n)) `xor` (typeHashWord (typeHash :: TypeHash o))
+    typeHash = mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $mixType $               (TypeHash 17803228377227705691)
 
 
 

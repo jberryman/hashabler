@@ -1,3 +1,8 @@
+1.2
+---
+* SipKey is now a new data type with unboxed fields, instead of tuple
+* export a new mixType helper for defining StableHashable instances
+
 1.1
 ---
 * Parameterize `Hash32/64/128` types by the type of their hashed source data,

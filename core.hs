@@ -5,7 +5,7 @@ import Data.Word
 import Data.Hashabler
 
 
-main = print $ siphash64 (1,2) (1::Word64, 2::Word32, 3::Word16, 4::Word8) 
+main = print $ siphash64 (SipKey 1 2) (1::Word64, 2::Word32, 3::Word16, 4::Word8)
 
 {-
 main = print $ (hash32Times 1000000000) (9999::Word32)

@@ -3,6 +3,7 @@ module Vectors.SipHash where
 import Data.List
 import Data.Word
 import Data.ByteString(ByteString, pack)
+import Data.Hashabler(SipKey(..))
 
 -- Formerly a translation of test vectors from reference implementation:
 --     https://github.com/veorq/SipHash/blob/master/main.c
@@ -11,8 +12,8 @@ import Data.ByteString(ByteString, pack)
 -- Hashable implementation of ByteString does a final mixConstructor).
 
 
-siphashKey :: (Word64,Word64) -- SipKey
-siphashKey = (0x0706050403020100, 0x0F0E0D0C0B0A0908)
+siphashKey :: SipKey
+siphashKey = SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908
 
 -- inputs from (empty string) to (00 01 02 ... 3e), with adjustments for endianness.
 siphashInputs :: [ByteString]

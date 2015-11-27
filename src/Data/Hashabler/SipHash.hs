@@ -3,7 +3,7 @@
 module Data.Hashabler.SipHash (
     siphash64
   , siphash128
-  , SipKey
+  , SipKey(..)
   ) where
 
 -- We use the identity monad for non-recursive binding and utilize name
@@ -60,7 +60,7 @@ sipRound v0 v1 v2 v3 = runIdentity $ do
 
 -- | A 128-bit secret key. This should be generated randomly and must be kept
 -- secret.
-type SipKey = (Word64,Word64)
+data SipKey = SipKey !Word64 !Word64
 
 data SipState = SipState {
                     v0 :: !Word64
@@ -168,7 +168,7 @@ siphashForWord (SipState{ .. }) m = runIdentity $
 -- properties and protection against hash flooding attacks.
 siphash64 :: Hashable a => SipKey -> a -> Hash64 a
 {-# INLINE siphash64 #-}
-siphash64 (k0,k1) = \a-> runIdentity $ do
+siphash64 (SipKey k0 k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
         v1 = 0x646f72616e646f6d
         v2 = 0x6c7967656e657261
@@ -210,13 +210,13 @@ siphash64 (k0,k1) = \a-> runIdentity $ do
 -- TODO if we extend this approach beyond 128-bits, then re-combine as much as
 -- possible (at least factor out up until final mixing.
 
--- | An implementation of 64-bit siphash-2-4.
+-- | An implementation of 128-bit siphash-2-4.
 --
 -- This function is fast on 64-bit machines, and provides very good hashing
 -- properties and protection against hash flooding attacks.
 siphash128 :: Hashable a => SipKey -> a -> Hash128 a
 {-# INLINE siphash128 #-}
-siphash128 (k0,k1) = \a-> runIdentity $ do
+siphash128 (SipKey k0 k1) = \a-> runIdentity $ do
     let v0 = 0x736f6d6570736575
         v1 = 0x646f72616e646f6d
         v2 = 0x6c7967656e657261

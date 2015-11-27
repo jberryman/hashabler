@@ -33,7 +33,7 @@ module Data.Hashabler (
  to be very secure against hash-flooding DOS attacks. SipHash is a good choice
  whenever your application may be hashing untrusted user data.
 -}
-  , SipKey
+  , SipKey(..)
   , siphash64
   , siphash128
 
@@ -89,7 +89,7 @@ module Data.Hashabler (
 
 
   -- * Stable \"hashes\" of Types
-  , StableHashable(..), TypeHash(..), typeHashOf, typeHashOfProxy
+  , StableHashable(..), TypeHash(..), mixType, typeHashOf, typeHashOfProxy
   
   -- * Implementing new hash functions
   , HashState(..)

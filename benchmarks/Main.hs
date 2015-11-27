@@ -141,7 +141,7 @@ main = do
 
       , bgroup "hashFNV32 on array types" [
             bench "strict ByteString x50" $ nf hashFNV32 bs50 
-          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (0x0706050403020100, 0x0F0E0D0C0B0A0908)) bs50 -- TODO just testing
+          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50 -- TODO just testing
           -- ought to be same as above:
           , bench "trivial lazy ByteString x50" $ nf hashFNV32 bs50LazyTrivial
           , bench "Text x50" $ nf hashFNV32 t50
@@ -151,7 +151,7 @@ main = do
 
           , bench "ByteArray x1000" $ nf hashFNV32 ba1000
           , bench "strict ByteString x1000" $ nf hashFNV32 bs1000
-          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (0x0706050403020100, 0x0F0E0D0C0B0A0908)) bs1000 -- TODO just testing
+          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs1000 -- TODO just testing
           , bench "lazy ByteString x1000, in 20 chunks" $ nf hashFNV32 bs1000Lazy_by20Chunks
           , bench "Text x1000" $ nf hashFNV32 t1000
           , bench "lazy Text x1000, in 20 chunks" $ nf hashFNV32 t1000Lazy_by20Chunks

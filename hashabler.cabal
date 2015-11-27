@@ -1,5 +1,5 @@
 name:                hashabler
-version:             1.2
+version:             1.2.1
 synopsis:            Principled, portable & extensible hashing of data and types, including an implementation of the FNV-1a and SipHash algorithms.
 description:         
     This package is a rewrite of the @hashable@ library by Milan Straka and

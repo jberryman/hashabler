@@ -61,6 +61,7 @@ sipRound v0 v1 v2 v3 = runIdentity $ do
 -- | A 128-bit secret key. This should be generated randomly and must be kept
 -- secret.
 data SipKey = SipKey !Word64 !Word64
+  deriving (Read, Show, Eq)
 
 data SipState = SipState {
                     v0 :: !Word64

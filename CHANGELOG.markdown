@@ -1,3 +1,7 @@
+1.2.1
+---
+* Eq, Read, Show for SipKey
+
 1.2
 ---
 * SipKey is now a new data type with unboxed fields, instead of tuple

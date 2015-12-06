@@ -163,8 +163,24 @@ module Data.Hashabler (
   , bytes32, bytes64, floatToWord, doubleToWord
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
   , _bytes64_32 , _bytes64_64, _signByte
+  , assertionCanary
 #endif
     ) where
 
 import Data.Hashabler.Internal
 import Data.Hashabler.SipHash
+
+#ifdef EXPORT_INTERNALS
+import Control.Exception
+
+-- This could go anywhere, and lets us ensure that assertions are turned on
+-- when running test suite.
+assertionCanary :: IO Bool
+assertionCanary = do
+    assertionsWorking <- try $ assert False $ return ()
+    return $
+      case assertionsWorking of
+           Left (AssertionFailed _) -> True
+           _                        -> False
+#endif
+

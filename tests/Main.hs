@@ -21,12 +21,12 @@ import Foreign.Marshal.Utils (fromBool)
 
 import System.IO
 import System.Environment(getArgs)
-import Control.Exception(assert)
 import Consistency(generatedVectorsDir, checkGeneratedVectors, regenerateVectors)
 import System.Directory
 import Control.Monad
 import Control.Applicative
 import Data.List
+import Control.Exception
 
 import Data.Word
 import Data.Int
@@ -63,10 +63,27 @@ main = do
 
 testsMain :: IO ()
 testsMain = do
+#  ifdef ASSERTIONS_ON
+    checkAssertionsOn
+#  else
+    putStrLn "!!! WARNING !!!: assertions not turned on in library code. configure with -finstrumented if you want to run tests with assertions enabled (it's good to test with both)"
+#  endif
     checkMiscUnitTests
     checkHashableInstances
     checkVectors
     checkSiphashSanity
+    putStrLn "ALL TESTS PASSED"
+
+checkAssertionsOn :: IO ()
+checkAssertionsOn = do
+    -- Make sure testing environment is sane:
+    assertionsWorking <- try $ assert False $ return ()
+    assertionsWorkingInLib <- assertionCanary
+    case assertionsWorking of
+         Left (AssertionFailed _)
+           | assertionsWorkingInLib -> putStrLn "Assertions: On"
+         _  -> error "Assertions aren't working"
+
 
 -- TODO better. Just bootstrap test vectors
 mixConstructorFNV32 :: Word8 -> Word32 -> Word32

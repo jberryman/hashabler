@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric,StandaloneDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Main ( 
     main
@@ -43,6 +44,10 @@ hash32Times iters =
 
 main :: IO ()
 main = do
+#  ifdef ASSERTIONS_ON
+    error "Sorry, please reconfigure without -finstrumented so that we turn off assertions in library code."
+#  endif
+
     let bs50 = B.pack $ replicate 48 1
         bs1000 = B.pack $ replicate 1000 1
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes

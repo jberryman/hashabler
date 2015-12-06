@@ -27,6 +27,6 @@ install:
  - cabal install --only-dependencies --enable-tests -fdev
 
 script:
- - cabal configure -fdev --enable-tests 
- - cabal build 
+ - cabal configure -fdev --enable-tests -finstrumented
+ - cabal build
  - cabal test tests

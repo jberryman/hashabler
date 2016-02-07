@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveGeneric,StandaloneDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE RankNTypes #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Main ( 
     main
@@ -13,6 +14,7 @@ import Data.Int
 import Data.Ratio
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
@@ -21,6 +23,7 @@ import Control.DeepSeq
 
 import Data.Hashabler
 import qualified Data.Hashable as Their
+
 
 instance NFData FNV32 where rnf = rnf . fnv32 
 instance NFData (Hash32 a) where rnf = rnf . hashWord32
@@ -53,6 +56,8 @@ main = do
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
         t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
     ba50 <- P.newByteArray 50 >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
+    ba50Aligned <- P.newAlignedPinnedByteArray 50 (P.alignment (undefined::Word64)) >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
+    ba50AlignedBadly <- P.newAlignedPinnedByteArray 50 (7) >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
     ba1000 <- P.newByteArray 1000 >>= \ba'-> P.fillByteArray ba' 0 1000 1 >> P.unsafeFreezeByteArray ba'
     -- lazy Text and ByteString:
     let bs50LazyTrivial = BL.fromStrict bs50
@@ -98,6 +103,11 @@ main = do
       , bench "[Text], hashabler" $  nf (hashWord32 . hashFNV32) allWordsListText
       -- TODO ByteString
       ],
+     bgroup "compare with hashable" [
+        hashableBenchmarkTheir "hashable"
+      , hashableBenchmarkFNV64
+      , hashableBenchmarkSiphash64
+     ],
      bgroup "dev" [
         -- We can more or less subtract this from benchmarks producing a Word32 hash:
 
@@ -144,22 +154,42 @@ main = do
           , bench "(,,,,,,,)" $ nf (hash32Times 100) (byt,byt,byt,byt,byt,byt,byt,byt)
           ]
 
-      , bgroup "hashFNV32 on array types" [
-            bench "strict ByteString x50" $ nf hashFNV32 bs50 
-          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50 -- TODO just testing
+      , bgroup "on array types, hashFNV64" [
+            bench "strict ByteString x50" $ nf hashFNV64 bs50
           -- ought to be same as above:
-          , bench "trivial lazy ByteString x50" $ nf hashFNV32 bs50LazyTrivial
-          , bench "Text x50" $ nf hashFNV32 t50
+          , bench "trivial lazy ByteString x50" $ nf hashFNV64 bs50LazyTrivial
+          , bench "Text x50" $ nf hashFNV64 t50
           -- ought to be same as above:
-          , bench "trivial lazy Text x50" $ nf hashFNV32 t50LazyTrivial
-          , bench "ByteArray x50" $ nf hashFNV32 ba50
+          , bench "trivial lazy Text x50" $ nf hashFNV64 t50LazyTrivial
+          , bench "ByteArray x50" $ nf hashFNV64 ba50
+          , bench "ByteArray x50 (pinned, aligned)" $ nf hashFNV64 ba50Aligned  -- (maybe non-aligned creation is aligned to word size)
+          , bench "ByteArray x50 (pinned, incorrectly-aligned)" $ nf hashFNV64 ba50AlignedBadly  -- (no difference here either)
 
-          , bench "ByteArray x1000" $ nf hashFNV32 ba1000
-          , bench "strict ByteString x1000" $ nf hashFNV32 bs1000
-          , bench "COMPARE ABOVE" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs1000 -- TODO just testing
-          , bench "lazy ByteString x1000, in 20 chunks" $ nf hashFNV32 bs1000Lazy_by20Chunks
-          , bench "Text x1000" $ nf hashFNV32 t1000
-          , bench "lazy Text x1000, in 20 chunks" $ nf hashFNV32 t1000Lazy_by20Chunks
+          , bench "ByteArray x1000" $ nf hashFNV64 ba1000
+          , bench "strict ByteString x1000" $ nf hashFNV64 bs1000
+          , bench "lazy ByteString x1000, in 20 chunks" $ nf hashFNV64 bs1000Lazy_by20Chunks
+          , bench "Text x1000" $ nf hashFNV64 t1000
+          , bench "lazy Text x1000, in 20 chunks" $ nf hashFNV64 t1000Lazy_by20Chunks
+          -- TODO Integer of comparable size to above
+          -- TODO BigNat on GHC 7.10
+          -- TODO Natural on GHC 7.10
+          ]
+      , bgroup "on array types, siphash64" [
+            bench "strict ByteString x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50
+          -- ought to be same as above:
+          , bench "trivial lazy ByteString x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50LazyTrivial
+          , bench "Text x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) t50
+          -- ought to be same as above:
+          , bench "trivial lazy Text x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) t50LazyTrivial
+          , bench "ByteArray x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) ba50
+          , bench "ByteArray x50 (pinned, aligned)" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) ba50Aligned  -- (maybe non-aligned creation is aligned to word size)
+          , bench "ByteArray x50 (pinned, incorrectly-aligned)" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) ba50AlignedBadly  -- (no difference here either)
+
+          , bench "ByteArray x1000" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) ba1000
+          , bench "strict ByteString x1000" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs1000
+          , bench "lazy ByteString x1000, in 20 chunks" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs1000Lazy_by20Chunks
+          , bench "Text x1000" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) t1000
+          , bench "lazy Text x1000, in 20 chunks" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) t1000Lazy_by20Chunks
           -- TODO Integer of comparable size to above
           -- TODO BigNat on GHC 7.10
           -- TODO Natural on GHC 7.10
@@ -172,3 +202,289 @@ main = do
 
       ]
      ]
+
+
+
+-- --------------------------------------------------------
+-- Sorry, couldn't figure out how to turn these into CPP macros:
+
+
+-- Taken from 'hashable' Benchmarks.hs @47eaf9f:
+hashableBenchmarkFNV64 :: Benchmark
+{-# INLINE hashableBenchmarkFNV64 #-}
+hashableBenchmarkFNV64 =
+    let
+        !mb = (2::Int)^(20 :: Int)  -- 1 Mb
+        s5 = ['\0'..'\4'];   s8 = ['\0'..'\7'];     s11 = ['\0'..'\10']
+        s40 = ['\0'..'\39']; s128 = ['\0'..'\127']; s512 = ['\0'..'\511']
+        s1Mb = ['\0'..'\999999']
+
+        !bs5 = B8.pack s5;   !bs8 = B8.pack s8;     !bs11 = B8.pack s11
+        !bs40 = B8.pack s40; !bs128 = B8.pack s128; !bs512 = B8.pack s512
+        !bs1Mb = B8.pack s1Mb
+
+        blmeg = BL.take (fromIntegral mb) . BL.fromChunks . repeat
+        bl5 = BL.fromChunks [bs5];     bl8 = BL.fromChunks [bs8]
+        bl11 = BL.fromChunks [bs11];   bl40 = BL.fromChunks [bs40]
+        bl128 = BL.fromChunks [bs128]; bl512 = BL.fromChunks [bs512]
+        bl1Mb_40 = blmeg bs40;         bl1Mb_128 = blmeg bs128
+        bl1Mb_64k = blmeg (B8.take 65536 bs1Mb)
+
+        !t5 = T.pack s5;   !t8 = T.pack s8;     !t11 = T.pack s11
+        !t40 = T.pack s40; !t128 = T.pack s128; !t512 = T.pack s512
+        !t1Mb = T.pack s1Mb
+
+        tlmeg = TL.take (fromIntegral mb) . TL.fromChunks . repeat
+        tl5 = TL.fromStrict t5;     tl8 = TL.fromStrict t8
+        tl11 = TL.fromStrict t11;   tl40 = TL.fromStrict t40
+        tl128 = TL.fromStrict t128; tl512 = TL.fromChunks (replicate 4 t128)
+        tl1Mb_40 = tlmeg t40;       tl1Mb_128 = tlmeg t128
+        tl1Mb_64k = tlmeg (T.take 65536 t1Mb)
+     in bgroup "hashabler hashFNV64"
+          [ bgroup "ByteString"
+            [ bgroup "strict"
+              [ bench "5" $ whnf (hashWord64 . hashFNV64) bs5
+              , bench "8" $ whnf (hashWord64 . hashFNV64) bs8
+              , bench "11" $ whnf (hashWord64 . hashFNV64) bs11
+              , bench "40" $ whnf (hashWord64 . hashFNV64) bs40
+              , bench "128" $ whnf (hashWord64 . hashFNV64) bs128
+              , bench "512" $ whnf (hashWord64 . hashFNV64) bs512
+              , bench "2^20" $ whnf (hashWord64 . hashFNV64) bs1Mb
+              ]
+            , bgroup "lazy"
+                [ bench "5" $ whnf (hashWord64 . hashFNV64) bl5
+                , bench "8" $ whnf (hashWord64 . hashFNV64) bl8
+                , bench "11" $ whnf (hashWord64 . hashFNV64) bl11
+                , bench "40" $ whnf (hashWord64 . hashFNV64) bl40
+                , bench "128" $ whnf (hashWord64 . hashFNV64) bl128
+                , bench "512" $ whnf (hashWord64 . hashFNV64) bl512
+                , bench "2^20_40" $ whnf (hashWord64 . hashFNV64) bl1Mb_40
+                , bench "2^20_128" $ whnf (hashWord64 . hashFNV64) bl1Mb_128
+                , bench "2^20_64k" $ whnf (hashWord64 . hashFNV64) bl1Mb_64k
+                ]
+            ]
+          , bgroup "String"
+            [ bench "5" $ whnf (hashWord64 . hashFNV64) s5
+            , bench "8" $ whnf (hashWord64 . hashFNV64) s8
+            , bench "11" $ whnf (hashWord64 . hashFNV64) s11
+            , bench "40" $ whnf (hashWord64 . hashFNV64) s40
+            , bench "128" $ whnf (hashWord64 . hashFNV64) s128
+            , bench "512" $ whnf (hashWord64 . hashFNV64) s512
+            , bench "2^20" $ whnf (hashWord64 . hashFNV64) s1Mb
+            ]
+          , bgroup "Text"
+            [ bgroup "strict"
+              [ bench "5" $ whnf (hashWord64 . hashFNV64) t5
+              , bench "8" $ whnf (hashWord64 . hashFNV64) t8
+              , bench "11" $ whnf (hashWord64 . hashFNV64) t11
+              , bench "40" $ whnf (hashWord64 . hashFNV64) t40
+              , bench "128" $ whnf (hashWord64 . hashFNV64) t128
+              , bench "512" $ whnf (hashWord64 . hashFNV64) t512
+              , bench "2^20" $ whnf (hashWord64 . hashFNV64) t1Mb
+              ]
+            , bgroup "lazy"
+              [ bench "5" $ whnf (hashWord64 . hashFNV64) tl5
+              , bench "8" $ whnf (hashWord64 . hashFNV64) tl8
+              , bench "11" $ whnf (hashWord64 . hashFNV64) tl11
+              , bench "40" $ whnf (hashWord64 . hashFNV64) tl40
+              , bench "128" $ whnf (hashWord64 . hashFNV64) tl128
+              , bench "512" $ whnf (hashWord64 . hashFNV64) tl512
+              , bench "2^20_40" $ whnf (hashWord64 . hashFNV64) tl1Mb_40
+              , bench "2^20_128" $ whnf (hashWord64 . hashFNV64) tl1Mb_128
+              , bench "2^20_64k" $ whnf (hashWord64 . hashFNV64) tl1Mb_64k
+              ]
+            ]
+          , bench "Int8" $ whnf (hashWord64 . hashFNV64) (127 :: Int8)
+          , bench "Int16" $ whnf (hashWord64 . hashFNV64) (0x7eef :: Int16)
+          , bench "Int32" $ whnf (hashWord64 . hashFNV64) (0x7eadbeef :: Int32)
+          , bench "Int" $ whnf (hashWord64 . hashFNV64) (0x7eadbeefdeadbeef :: Int)
+          , bench "Int64" $ whnf (hashWord64 . hashFNV64) (0x7eadbeefdeadbeef :: Int64)
+          , bench "Double" $ whnf (hashWord64 . hashFNV64) (0.3780675796601578 :: Double)
+          ]
+
+-- Taken from 'hashable' Benchmarks.hs @47eaf9f:
+hashableBenchmarkSiphash64 :: Benchmark
+{-# INLINE hashableBenchmarkSiphash64 #-}
+hashableBenchmarkSiphash64 =
+    let
+        !mb = (2::Int)^(20 :: Int)  -- 1 Mb
+        s5 = ['\0'..'\4'];   s8 = ['\0'..'\7'];     s11 = ['\0'..'\10']
+        s40 = ['\0'..'\39']; s128 = ['\0'..'\127']; s512 = ['\0'..'\511']
+        s1Mb = ['\0'..'\999999']
+
+        !bs5 = B8.pack s5;   !bs8 = B8.pack s8;     !bs11 = B8.pack s11
+        !bs40 = B8.pack s40; !bs128 = B8.pack s128; !bs512 = B8.pack s512
+        !bs1Mb = B8.pack s1Mb
+
+        blmeg = BL.take (fromIntegral mb) . BL.fromChunks . repeat
+        bl5 = BL.fromChunks [bs5];     bl8 = BL.fromChunks [bs8]
+        bl11 = BL.fromChunks [bs11];   bl40 = BL.fromChunks [bs40]
+        bl128 = BL.fromChunks [bs128]; bl512 = BL.fromChunks [bs512]
+        bl1Mb_40 = blmeg bs40;         bl1Mb_128 = blmeg bs128
+        bl1Mb_64k = blmeg (B8.take 65536 bs1Mb)
+
+        !t5 = T.pack s5;   !t8 = T.pack s8;     !t11 = T.pack s11
+        !t40 = T.pack s40; !t128 = T.pack s128; !t512 = T.pack s512
+        !t1Mb = T.pack s1Mb
+
+        tlmeg = TL.take (fromIntegral mb) . TL.fromChunks . repeat
+        tl5 = TL.fromStrict t5;     tl8 = TL.fromStrict t8
+        tl11 = TL.fromStrict t11;   tl40 = TL.fromStrict t40
+        tl128 = TL.fromStrict t128; tl512 = TL.fromChunks (replicate 4 t128)
+        tl1Mb_40 = tlmeg t40;       tl1Mb_128 = tlmeg t128
+        tl1Mb_64k = tlmeg (T.take 65536 t1Mb)
+     in bgroup "hashabler siphash64"
+          [ bgroup "ByteString"
+            [ bgroup "strict"
+              [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs5
+              , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs8
+              , bench "11" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs11
+              , bench "40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs40
+              , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs128
+              , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs512
+              , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs1Mb
+              ]
+            , bgroup "lazy"
+                [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl5
+                , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl8
+                , bench "11" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl11
+                , bench "40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl40
+                , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl128
+                , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl512
+                , bench "2^20_40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl1Mb_40
+                , bench "2^20_128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl1Mb_128
+                , bench "2^20_64k" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl1Mb_64k
+                ]
+            ]
+          , bgroup "String"
+            [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s5
+            , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s8
+            , bench "11" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s11
+            , bench "40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s40
+            , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s128
+            , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s512
+            , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s1Mb
+            ]
+          , bgroup "Text"
+            [ bgroup "strict"
+              [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t5
+              , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t8
+              , bench "11" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t11
+              , bench "40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t40
+              , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t128
+              , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t512
+              , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t1Mb
+              ]
+            , bgroup "lazy"
+              [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl5
+              , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl8
+              , bench "11" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl11
+              , bench "40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl40
+              , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl128
+              , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl512
+              , bench "2^20_40" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl1Mb_40
+              , bench "2^20_128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl1Mb_128
+              , bench "2^20_64k" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl1Mb_64k
+              ]
+            ]
+          , bench "Int8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) (127 :: Int8)
+          , bench "Int16" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) (0x7eef :: Int16)
+          , bench "Int32" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) (0x7eadbeef :: Int32)
+          , bench "Int" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) (0x7eadbeefdeadbeef :: Int)
+          , bench "Int64" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) (0x7eadbeefdeadbeef :: Int64)
+          , bench "Double" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) (0.3780675796601578 :: Double)
+          ]
+
+
+-- Same as above; just couldn't quite figure out how to get this to work
+hashableBenchmarkTheir :: String -> Benchmark
+{-# INLINE hashableBenchmarkTheir #-}
+hashableBenchmarkTheir nm =
+    let
+        !mb = (2::Int)^(20 :: Int)  -- 1 Mb
+        s5 = ['\0'..'\4'];   s8 = ['\0'..'\7'];     s11 = ['\0'..'\10']
+        s40 = ['\0'..'\39']; s128 = ['\0'..'\127']; s512 = ['\0'..'\511']
+        s1Mb = ['\0'..'\999999']
+
+        !bs5 = B8.pack s5;   !bs8 = B8.pack s8;     !bs11 = B8.pack s11
+        !bs40 = B8.pack s40; !bs128 = B8.pack s128; !bs512 = B8.pack s512
+        !bs1Mb = B8.pack s1Mb
+
+        blmeg = BL.take (fromIntegral mb) . BL.fromChunks . repeat
+        bl5 = BL.fromChunks [bs5];     bl8 = BL.fromChunks [bs8]
+        bl11 = BL.fromChunks [bs11];   bl40 = BL.fromChunks [bs40]
+        bl128 = BL.fromChunks [bs128]; bl512 = BL.fromChunks [bs512]
+        bl1Mb_40 = blmeg bs40;         bl1Mb_128 = blmeg bs128
+        bl1Mb_64k = blmeg (B8.take 65536 bs1Mb)
+
+        !t5 = T.pack s5;   !t8 = T.pack s8;     !t11 = T.pack s11
+        !t40 = T.pack s40; !t128 = T.pack s128; !t512 = T.pack s512
+        !t1Mb = T.pack s1Mb
+
+        tlmeg = TL.take (fromIntegral mb) . TL.fromChunks . repeat
+        tl5 = TL.fromStrict t5;     tl8 = TL.fromStrict t8
+        tl11 = TL.fromStrict t11;   tl40 = TL.fromStrict t40
+        tl128 = TL.fromStrict t128; tl512 = TL.fromChunks (replicate 4 t128)
+        tl1Mb_40 = tlmeg t40;       tl1Mb_128 = tlmeg t128
+        tl1Mb_64k = tlmeg (T.take 65536 t1Mb)
+     in bgroup nm
+          [ bgroup "ByteString"
+            [ bgroup "strict"
+              [ bench "5" $ whnf Their.hash bs5
+              , bench "8" $ whnf Their.hash bs8
+              , bench "11" $ whnf Their.hash bs11
+              , bench "40" $ whnf Their.hash bs40
+              , bench "128" $ whnf Their.hash bs128
+              , bench "512" $ whnf Their.hash bs512
+              , bench "2^20" $ whnf Their.hash bs1Mb
+              ]
+            , bgroup "lazy"
+                [ bench "5" $ whnf Their.hash bl5
+                , bench "8" $ whnf Their.hash bl8
+                , bench "11" $ whnf Their.hash bl11
+                , bench "40" $ whnf Their.hash bl40
+                , bench "128" $ whnf Their.hash bl128
+                , bench "512" $ whnf Their.hash bl512
+                , bench "2^20_40" $ whnf Their.hash bl1Mb_40
+                , bench "2^20_128" $ whnf Their.hash bl1Mb_128
+                , bench "2^20_64k" $ whnf Their.hash bl1Mb_64k
+                ]
+            ]
+          , bgroup "String"
+            [ bench "5" $ whnf Their.hash s5
+            , bench "8" $ whnf Their.hash s8
+            , bench "11" $ whnf Their.hash s11
+            , bench "40" $ whnf Their.hash s40
+            , bench "128" $ whnf Their.hash s128
+            , bench "512" $ whnf Their.hash s512
+            , bench "2^20" $ whnf Their.hash s1Mb
+            ]
+          , bgroup "Text"
+            [ bgroup "strict"
+              [ bench "5" $ whnf Their.hash t5
+              , bench "8" $ whnf Their.hash t8
+              , bench "11" $ whnf Their.hash t11
+              , bench "40" $ whnf Their.hash t40
+              , bench "128" $ whnf Their.hash t128
+              , bench "512" $ whnf Their.hash t512
+              , bench "2^20" $ whnf Their.hash t1Mb
+              ]
+            , bgroup "lazy"
+              [ bench "5" $ whnf Their.hash tl5
+              , bench "8" $ whnf Their.hash tl8
+              , bench "11" $ whnf Their.hash tl11
+              , bench "40" $ whnf Their.hash tl40
+              , bench "128" $ whnf Their.hash tl128
+              , bench "512" $ whnf Their.hash tl512
+              , bench "2^20_40" $ whnf Their.hash tl1Mb_40
+              , bench "2^20_128" $ whnf Their.hash tl1Mb_128
+              , bench "2^20_64k" $ whnf Their.hash tl1Mb_64k
+              ]
+            ]
+          , bench "Int8" $ whnf Their.hash (127 :: Int8)
+          , bench "Int16" $ whnf Their.hash (0x7eef :: Int16)
+          , bench "Int32" $ whnf Their.hash (0x7eadbeef :: Int32)
+          , bench "Int" $ whnf Their.hash (0x7eadbeefdeadbeef :: Int)
+          , bench "Int64" $ whnf Their.hash (0x7eadbeefdeadbeef :: Int64)
+          , bench "Double" $ whnf Their.hash (0.3780675796601578 :: Double)
+          ]

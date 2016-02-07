@@ -367,7 +367,6 @@ newtype FNV64 = FNV64 { fnv64 :: Word64 }
 instance HashState FNV32 where
     {-# INLINE mix8 #-}
     mix8 (FNV32 h32) = \b-> FNV32 $ (h32 `xor` fromIntegral b) * fnvPrime32
-    -- TODO look at inlining
 
 
 -- | Hash a value using the standard spec-prescribed 32-bit seed value.
@@ -386,7 +385,6 @@ hashFNV32 = Hash32 . fnv32 . hash fnvOffsetBasis32
 instance HashState FNV64 where
     {-# INLINE mix8 #-}
     mix8 (FNV64 h64) = \b-> FNV64 $ (h64 `xor` fromIntegral b) * fnvPrime64
-    -- TODO look at inlining
 
 
 -- | Hash a value using the standard spec-prescribed 64-bit seed value. This
@@ -1147,6 +1145,8 @@ instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d
 -- WISHLIST:
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.
 
+-- TODO PERFORMANCE:
+--   consider the accursedUnutterablePerformIO bullshit from bytestring; shaves off 4ns here:
 
 -- This is about twice as fast as a loop with single byte peeks:
 hashByteString :: (HashState h)=> h -> B.ByteString -> h
@@ -1168,7 +1168,6 @@ hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
 
                     hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
             
-            -- TODO we could unroll this for [0..7], and/or call mix16 and mix32
             hashRemainingBytes !hAcc !ix 
                 | ix > ixFinal  = return hAcc 
                 | otherwise     = assert (ix <= ixFinal) $ do
@@ -1201,7 +1200,6 @@ hashText h = \(T.Text (T.Array ba_) off lenWord16) ->
                     w3 = P.indexByteArray ba (ix+3)
                  in hash4Word16sLoop (hAcc `mix16` w0 `mix16` w1 `mix16` w2 `mix16` w3) (ix + 4)
         
-        -- TODO we could unroll this for [0..3]
         hashRemainingWord16s !hAcc !ix 
             | ix > ixFinal  = hAcc 
             | otherwise     = assert (ix <= ixFinal) $
@@ -1231,7 +1229,6 @@ hashByteArray h !lenBytes ba =
 
                      in hash8ByteLoop (hAcc `mix64` w64) (ix + 1)
         
-        -- TODO we could unroll this for [0..7], and/or call mix16 and mix32
         hashRemainingBytes !hAcc !ix 
             | ix > ixFinal  = hAcc 
             | otherwise     = assert (ix <= ixFinal) $

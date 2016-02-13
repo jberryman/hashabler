@@ -185,12 +185,13 @@ benchmark core
       build-depends:       
            base
          , hashabler
+         , bytestring
   else 
       buildable: False
 
   if flag(dev)
       ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
-      ghc-options: -O2  -rtsopts  
+      ghc-options: -O2  -rtsopts -funbox-strict-fields
  
   -- Either do threaded for eventlogging and simple timing...
   --ghc-options: -threaded -eventlog

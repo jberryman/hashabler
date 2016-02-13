@@ -55,6 +55,23 @@ main = do
         bs1000 = B.pack $ replicate 1000 1
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
         t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
+        --
+        bs1 = B.pack $ replicate 1 1
+        bs2 = B.pack $ replicate 2 1
+        bs3 = B.pack $ replicate 3 1
+        bs4 = B.pack $ replicate 4 1
+        bs5 = B.pack $ replicate 5 1
+        bs6 = B.pack $ replicate 6 1
+        bs7 = B.pack $ replicate 7 1
+        bs8 = B.pack $ replicate 8 1
+        bs16 = B.pack $ replicate 16 1
+        bs32 = B.pack $ replicate 32 1
+        bs64 = B.pack $ replicate 64 1
+        bs128 = B.pack $ replicate 128 1
+        bs256 = B.pack $ replicate 256 1
+        bs512 = B.pack $ replicate 512 1
+        bs1024 = B.pack $ replicate 1024 1
+
     ba50 <- P.newByteArray 50 >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
     ba50Aligned <- P.newAlignedPinnedByteArray 50 (P.alignment (undefined::Word64)) >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
     ba50AlignedBadly <- P.newAlignedPinnedByteArray 50 (7) >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
@@ -174,6 +191,24 @@ main = do
           -- TODO BigNat on GHC 7.10
           -- TODO Natural on GHC 7.10
           ]
+
+      , bgroup "on ByteStrings of various sizes, siphash64" [
+            bench "1" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1
+          , bench "2" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs2
+          , bench "3" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs3
+          , bench "4" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs4
+          , bench "5" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs5
+          , bench "6" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs6
+          , bench "7" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs7
+          , bench "8" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs8
+          , bench "16" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs16
+          , bench "32" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs32
+          , bench "64" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs64
+          , bench "128" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs128
+          , bench "256" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs256
+          , bench "512" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs512
+          , bench "1024" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1024
+      ]
       , bgroup "on array types, siphash64" [
             bench "strict ByteString x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50
           -- ought to be same as above:

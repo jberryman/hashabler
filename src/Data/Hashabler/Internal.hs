@@ -1161,6 +1161,7 @@ hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
+                -- TODO try using peek, where: peekByteOff addr off = peek (addr `plusPtr` off)
                     w64Dirty <- peekByteOff base ix
                     let w64 = if littleEndian
                                 then byteSwap64 w64Dirty

@@ -42,9 +42,6 @@ import GHC.ST (runST, ST)
 import Data.Version(Version, versionBranch)
 import Data.Unique(Unique, hashUnique)
 
--- for reading the bytes of ByteStrings:
-import System.IO.Unsafe (unsafeDupablePerformIO)
-
 -- For getting our Int from ThreadId:
 import Foreign.C (CInt(..))
 import GHC.Conc(ThreadId(..))
@@ -94,6 +91,21 @@ import MachDeps
 #endif
 
 import Unsafe.Coerce
+
+-- for reading the bytes of ByteStrings:
+# if MIN_VERSION_bytestring(0,10,6)
+-- This eliminates ~5ns overhead vs unsafeDupablePerformIO. We don't understand
+-- the implications but will use it in the same way it's used in ByteString.
+import Data.ByteString.Internal(accursedUnutterablePerformIO)
+# else
+import System.IO.Unsafe (unsafeDupablePerformIO)
+
+----------------------------- END IMPORTS --------------------------------
+
+accursedUnutterablePerformIO :: IO a -> a
+accursedUnutterablePerformIO = unsafeDupablePerformIO
+# endif
+
 
 -- COMMENTED BELOW, WHEN FOUND NOT BENEFICIAL:
 -- These should be fine in all cases:
@@ -1145,13 +1157,12 @@ instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d
 -- WISHLIST:
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.
 
--- TODO PERFORMANCE:
---   consider the accursedUnutterablePerformIO bullshit from bytestring; shaves off 4ns here:
-
 -- This is about twice as fast as a loop with single byte peeks:
 hashByteString :: (HashState h)=> h -> B.ByteString -> h
 {-# INLINE hashByteString #-}
-hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
+hashByteString h = \(B.PS fp off lenBytes) ->
+  -- similar to: https://github.com/haskell/bytestring/blob/dd3c07d115840d13482426a0084a39201eb6b6d4/Data/ByteString/Unsafe.hs#L78
+  accursedUnutterablePerformIO $
       withForeignPtr fp $ \base ->
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
             -- index where we begin to read (bytesRem < 8) individual bytes:
@@ -1161,20 +1172,19 @@ hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
-                -- TODO try using peek, where: peekByteOff addr off = peek (addr `plusPtr` off)
                     w64Dirty <- peekByteOff base ix
                     let w64 = if littleEndian
                                 then byteSwap64 w64Dirty
                                 else w64Dirty
 
                     hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
-            
+
             hashRemainingBytes !hAcc !ix 
                 | ix > ixFinal  = return hAcc 
                 | otherwise     = assert (ix <= ixFinal) $ do
                     byt <- peekByteOff base ix
                     hashRemainingBytes (hAcc `mix8` byt) (ix+1)
-        
+
          in hash8ByteLoop h off 
 
 

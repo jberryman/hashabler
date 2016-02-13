@@ -64,6 +64,8 @@ main = do
         bs6 = B.pack $ replicate 6 1
         bs7 = B.pack $ replicate 7 1
         bs8 = B.pack $ replicate 8 1
+        bs9 = B.pack $ replicate 9 1
+        bs11 = B.pack $ replicate 11 1
         bs16 = B.pack $ replicate 16 1
         bs32 = B.pack $ replicate 32 1
         bs64 = B.pack $ replicate 64 1
@@ -193,7 +195,17 @@ main = do
           ]
 
       , bgroup "on ByteStrings of various sizes, siphash64" [
-            bench "1" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1
+          -- try to fool branch prediction in hashByteString and
+          let ls = [ 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+           in bench "(baseline for fooling branch prediction)" $ nf (map (Hash64 :: Word64 -> Hash64 B.ByteString)) ls
+          , bench "100 (fooling branch prediction)" $ nf
+              (map (hashWord64 . siphash64 (SipKey 1 2)))
+              [ bs1, bs9, bs8, bs32, bs11, bs9, bs3, bs16, bs11 ]
+          , bench "96 (more predictable branches)" $ nf
+              (map (hashWord64 . siphash64 (SipKey 1 2)))
+              [ bs16, bs16, bs16, bs16, bs16, bs16 ]
+
+          , bench "1" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1
           , bench "2" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs2
           , bench "3" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs3
           , bench "4" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs4

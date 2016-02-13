@@ -32,7 +32,8 @@ dROUNDS = 4
 -- #define ROTL(x,b) (uint64_t)( ((x) << (b)) | ( (x) >> (64 - (b))) )
 rotl :: Word64 -> Int -> Word64
 {-# INLINE rotl #-}
-rotl x b = (x `unsafeShiftL` b) .|. (x `unsafeShiftR` (64 - b))
+rotl x b = assert (b > 0 && b < 64) $
+    (x `unsafeShiftL` b) .|. (x `unsafeShiftR` (64 - b))
 
 -- Two siphash rounds. This seemed to encourage inlining I wasn't getting for
 -- some reason, and makes things twice as fast for small bytestrings.

@@ -184,6 +184,13 @@ siphashForWord (SipState{ .. }) m = runIdentity $
         v0 <- return $ v0 `xor` m
         return (v0,v1,v2,v3)
 
+-- TODO PERFORMANCE:
+--  - look at crazy branches in ByteString impl and try to eliminate.
+--     -Using Ints might help
+--     -See the branchless ghc wiki page.
+--     -Look for eliminating `case`
+--  - fiddling w/ ptr arith and unsafe bullshit thing in bytestring instance.
+--  x play with tagToEnum in siphashForWord
 
 -- | An implementation of 64-bit siphash-2-4.
 --

@@ -201,9 +201,12 @@ main = do
           , bench "100 (fooling branch prediction)" $ nf
               (map (hashWord64 . siphash64 (SipKey 1 2)))
               [ bs1, bs9, bs8, bs32, bs11, bs9, bs3, bs16, bs11 ]
-          , bench "96 (more predictable branches)" $ nf
+          , bench "96 (#1 more predictable branches)" $ nf
               (map (hashWord64 . siphash64 (SipKey 1 2)))
               [ bs16, bs16, bs16, bs16, bs16, bs16 ]
+          , bench "96 (#2 more predictable branches)" $ nf
+              (map (hashWord64 . siphash64 (SipKey 1 2)))
+              [ bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8 ]
 
           , bench "1" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1
           , bench "2" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs2
@@ -220,6 +223,36 @@ main = do
           , bench "256" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs256
           , bench "512" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs512
           , bench "1024" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1024
+      ]
+      , bgroup "on ByteStrings of various sizes, hashable" [
+          -- try to fool branch prediction in hashByteString and
+          let ls = [ 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+           in bench "(baseline for fooling branch prediction)" $ nf (map (Hash64 :: Word64 -> Hash64 B.ByteString)) ls
+          , bench "100 (fooling branch prediction)" $ nf
+              (map Their.hash)
+              [ bs1, bs9, bs8, bs32, bs11, bs9, bs3, bs16, bs11 ]
+          , bench "96 (#1 more predictable branches)" $ nf
+              (map Their.hash)
+              [ bs16, bs16, bs16, bs16, bs16, bs16 ]
+          , bench "96 (#2 more predictable branches)" $ nf
+              (map Their.hash)
+              [ bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8 ]
+
+          , bench "1" $ nf Their.hash bs1
+          , bench "2" $ nf Their.hash bs2
+          , bench "3" $ nf Their.hash bs3
+          , bench "4" $ nf Their.hash bs4
+          , bench "5" $ nf Their.hash bs5
+          , bench "6" $ nf Their.hash bs6
+          , bench "7" $ nf Their.hash bs7
+          , bench "8" $ nf Their.hash bs8
+          , bench "16" $ nf Their.hash bs16
+          , bench "32" $ nf Their.hash bs32
+          , bench "64" $ nf Their.hash bs64
+          , bench "128" $ nf Their.hash bs128
+          , bench "256" $ nf Their.hash bs256
+          , bench "512" $ nf Their.hash bs512
+          , bench "1024" $ nf Their.hash bs1024
       ]
       , bgroup "on array types, siphash64" [
             bench "strict ByteString x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50

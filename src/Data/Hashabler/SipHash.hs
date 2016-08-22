@@ -35,13 +35,10 @@ rotl :: Word64 -> Int -> Word64
 rotl x b = assert (b > 0 && b < 64) $
     (x `unsafeShiftL` b) .|. (x `unsafeShiftR` (64 - b))
 
--- Two siphash rounds. This seemed to encourage inlining I wasn't getting for
--- some reason, and makes things twice as fast for small bytestrings.
--- TODO see if we can get inlining back by just playing with INLINE phases
-sipRound2 :: Word64 -> Word64 -> Word64 -> Word64 -> (Word64, Word64, Word64, Word64)
-{-# INLINE sipRound2 #-}
-sipRound2 v0 v1 v2 v3 = runIdentity $ do
-    -- ROUND 1
+
+sipRound :: Word64 -> Word64 -> Word64 -> Word64 -> Identity (Word64, Word64, Word64, Word64)
+{-# INLINE[2] sipRound #-}
+sipRound v0 v1 v2 v3 = do
     v0 <- return $ v0 + v1 
     v1 <- return $ rotl v1 13
     v1 <- return $ v1 `xor` v0
@@ -59,26 +56,32 @@ sipRound2 v0 v1 v2 v3 = runIdentity $ do
     v1 <- return $ rotl v1 17
     v1 <- return $ v1 `xor` v2
     v2 <- return $ rotl v2 32
-
-    -- ROUND 2
-    v0 <- return $ v0 + v1
-    v1 <- return $ rotl v1 13
-    v1 <- return $ v1 `xor` v0
-    v0 <- return $ rotl v0 32
-
-    v2 <- return $ v2 + v3
-    v3 <- return $ rotl v3 16
-    v3 <- return $ v3 `xor` v2
-
-    v0 <- return $ v0 + v3
-    v3 <- return $ rotl v3 21
-    v3 <- return $ v3 `xor` v0
-
-    v2 <- return $ v2 + v1
-    v1 <- return $ rotl v1 17
-    v1 <- return $ v1 `xor` v2
-    v2 <- return $ rotl v2 32
     return (v0, v1, v2, v3)
+
+-- to promote inlining:
+sipRounds :: Int -> Word64 -> Word64 -> Word64 -> Word64 -> Identity (Word64, Word64, Word64, Word64)
+{-# INLINE[3] sipRounds #-}
+sipRounds 0 = error "The number of rounds must be > 0" 
+sipRounds 1 = \v0 v1 v2 v3 -> do
+    sipRound v0 v1 v2 v3
+sipRounds 2 = \v0 v1 v2 v3 -> do 
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    sipRound v0 v1 v2 v3
+sipRounds 3 = \v0 v1 v2 v3 -> do 
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    sipRound v0 v1 v2 v3
+sipRounds 4 = \v0 v1 v2 v3 -> do 
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    sipRound v0 v1 v2 v3
+sipRounds n = go n where
+  go 0 v0 v1 v2 v3 = return (v0,v1,v2,v3)
+  go n' v0 v1 v2 v3 = do
+    (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
+    go (n'-1) v0 v1 v2 v3
+
 
 
 -- | A 128-bit secret key. This should be generated randomly and must be kept
@@ -179,7 +182,7 @@ siphashForWord (SipState{ .. }) m = runIdentity $
     sipMix v0 v1 v2 v3 m = do
         v3 <- return $ v3 `xor` m
      -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
-        (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
+        (v0,v1,v2,v3) <- sipRounds 2 v0 v1 v2 v3
 
         v0 <- return $ v0 `xor` m
         return (v0,v1,v2,v3)
@@ -191,6 +194,7 @@ siphashForWord (SipState{ .. }) m = runIdentity $
 --     -Look for eliminating `case`
 --  - fiddling w/ ptr arith and unsafe bullshit thing in bytestring instance.
 --  x play with tagToEnum in siphashForWord
+--  - move as much work as possible to the left of \a-> so it can be calculated once.
 
 -- | An implementation of 64-bit siphash-2-4.
 --
@@ -220,15 +224,14 @@ siphash64 (SipKey k0 k1) = \a-> runIdentity $ do
 
     v3 <- return $ v3 `xor` b
     -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRounds 2 v0 v1 v2 v3
     v0 <- return $ v0 `xor` b
 
     -- 0xff may be "Any non-zero value":
     v2 <- return $ v2 `xor` 0xff
 
 --   for( i=0; i<dROUNDS; ++i ) SIPROUND;
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRounds 4 v0 v1 v2 v3
 
     return $! Hash64 $! v0 `xor` v1 `xor` v2 `xor` v3
 
@@ -268,7 +271,7 @@ siphash128 (SipKey k0 k1) = \a-> runIdentity $ do
 
     v3 <- return $ v3 `xor` b
     -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRounds 2 v0 v1 v2 v3
     v0 <- return $ v0 `xor` b
 
     -- N.B. 0xff CHANGED to 0xee in 128:
@@ -276,16 +279,14 @@ siphash128 (SipKey k0 k1) = \a-> runIdentity $ do
     v2 <- return $ v2 `xor` 0xee
 
 --   for( i=0; i<dROUNDS; ++i ) SIPROUND;
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRounds 4 v0 v1 v2 v3
 
     let !b0 = v0 `xor` v1 `xor` v2 `xor` v3
 
     -- N.B. ADDED in 128:
     v1 <- return $ v1 `xor` 0xdd
 --   for( i=0; i<dROUNDS; ++i ) SIPROUND;
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
-    (v0,v1,v2,v3) <- return $ sipRound2 v0 v1 v2 v3
+    (v0,v1,v2,v3) <- sipRounds 4 v0 v1 v2 v3
 
     let !b1 = v0 `xor` v1 `xor` v2 `xor` v3
 

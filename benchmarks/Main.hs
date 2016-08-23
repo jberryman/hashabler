@@ -55,6 +55,25 @@ main = do
         bs1000 = B.pack $ replicate 1000 1
         t50 = T.pack $ replicate 25 'a' -- TODO verify this is 50 bytes
         t1000 = T.pack $ replicate 500 'a' -- TODO verify this is 1000 bytes
+        --
+        bs1 = B.pack $ replicate 1 1
+        bs2 = B.pack $ replicate 2 1
+        bs3 = B.pack $ replicate 3 1
+        bs4 = B.pack $ replicate 4 1
+        bs5 = B.pack $ replicate 5 1
+        bs6 = B.pack $ replicate 6 1
+        bs7 = B.pack $ replicate 7 1
+        bs8 = B.pack $ replicate 8 1
+        bs9 = B.pack $ replicate 9 1
+        bs11 = B.pack $ replicate 11 1
+        bs16 = B.pack $ replicate 16 1
+        bs32 = B.pack $ replicate 32 1
+        bs64 = B.pack $ replicate 64 1
+        bs128 = B.pack $ replicate 128 1
+        bs256 = B.pack $ replicate 256 1
+        bs512 = B.pack $ replicate 512 1
+        bs1024 = B.pack $ replicate 1024 1
+
     ba50 <- P.newByteArray 50 >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
     ba50Aligned <- P.newAlignedPinnedByteArray 50 (P.alignment (undefined::Word64)) >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
     ba50AlignedBadly <- P.newAlignedPinnedByteArray 50 (7) >>= \ba'-> P.fillByteArray ba' 0 50 1 >> P.unsafeFreezeByteArray ba'
@@ -174,6 +193,67 @@ main = do
           -- TODO BigNat on GHC 7.10
           -- TODO Natural on GHC 7.10
           ]
+
+      , bgroup "on ByteStrings of various sizes, siphash64" [
+          -- try to fool branch prediction in hashByteString and
+          let ls = [ 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+           in bench "(baseline for fooling branch prediction)" $ nf (map (Hash64 :: Word64 -> Hash64 B.ByteString)) ls
+          , bench "100 (fooling branch prediction)" $ nf
+              (map (hashWord64 . siphash64 (SipKey 1 2)))
+              [ bs1, bs9, bs8, bs32, bs11, bs9, bs3, bs16, bs11 ]
+          , bench "96 (#1 more predictable branches)" $ nf
+              (map (hashWord64 . siphash64 (SipKey 1 2)))
+              [ bs16, bs16, bs16, bs16, bs16, bs16 ]
+          , bench "96 (#2 more predictable branches)" $ nf
+              (map (hashWord64 . siphash64 (SipKey 1 2)))
+              [ bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8 ]
+
+          , bench "1" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1
+          , bench "2" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs2
+          , bench "3" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs3
+          , bench "4" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs4
+          , bench "5" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs5
+          , bench "6" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs6
+          , bench "7" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs7
+          , bench "8" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs8
+          , bench "16" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs16
+          , bench "32" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs32
+          , bench "64" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs64
+          , bench "128" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs128
+          , bench "256" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs256
+          , bench "512" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs512
+          , bench "1024" $ nf (hashWord64 . siphash64 (SipKey 1 2)) bs1024
+      ]
+      , bgroup "on ByteStrings of various sizes, hashable" [
+          -- try to fool branch prediction in hashByteString and
+          let ls = [ 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+           in bench "(baseline for fooling branch prediction)" $ nf (map (Hash64 :: Word64 -> Hash64 B.ByteString)) ls
+          , bench "100 (fooling branch prediction)" $ nf
+              (map Their.hash)
+              [ bs1, bs9, bs8, bs32, bs11, bs9, bs3, bs16, bs11 ]
+          , bench "96 (#1 more predictable branches)" $ nf
+              (map Their.hash)
+              [ bs16, bs16, bs16, bs16, bs16, bs16 ]
+          , bench "96 (#2 more predictable branches)" $ nf
+              (map Their.hash)
+              [ bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8, bs8 ]
+
+          , bench "1" $ nf Their.hash bs1
+          , bench "2" $ nf Their.hash bs2
+          , bench "3" $ nf Their.hash bs3
+          , bench "4" $ nf Their.hash bs4
+          , bench "5" $ nf Their.hash bs5
+          , bench "6" $ nf Their.hash bs6
+          , bench "7" $ nf Their.hash bs7
+          , bench "8" $ nf Their.hash bs8
+          , bench "16" $ nf Their.hash bs16
+          , bench "32" $ nf Their.hash bs32
+          , bench "64" $ nf Their.hash bs64
+          , bench "128" $ nf Their.hash bs128
+          , bench "256" $ nf Their.hash bs256
+          , bench "512" $ nf Their.hash bs512
+          , bench "1024" $ nf Their.hash bs1024
+      ]
       , bgroup "on array types, siphash64" [
             bench "strict ByteString x50" $ nf (hashWord64 . siphash64 (SipKey 0x0706050403020100 0x0F0E0D0C0B0A0908)) bs50
           -- ought to be same as above:
@@ -344,6 +424,15 @@ hashableBenchmarkSiphash64 =
               , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs512
               , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs1Mb
               ]
+            , bgroup "strict (with siphash-1-3)" -- TODO make proper benchmark set for siphash64_1_3
+              [ bench "5" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs5
+              , bench "8" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs8
+              , bench "11" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs11
+              , bench "40" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs40
+              , bench "128" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs128
+              , bench "512" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs512
+              , bench "2^20" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs1Mb
+              ]
             , bgroup "lazy"
                 [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl5
                 , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl8
@@ -374,6 +463,15 @@ hashableBenchmarkSiphash64 =
               , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t128
               , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t512
               , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t1Mb
+              ]
+            , bgroup "strict (with siphash-1-3)" -- TODO make proper benchmark set for siphash64_1_3
+              [ bench "5" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t5
+              , bench "8" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t8
+              , bench "11" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t11
+              , bench "40" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t40
+              , bench "128" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t128
+              , bench "512" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t512
+              , bench "2^20" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t1Mb
               ]
             , bgroup "lazy"
               [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl5

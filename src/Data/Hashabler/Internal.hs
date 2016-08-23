@@ -42,9 +42,6 @@ import GHC.ST (runST, ST)
 import Data.Version(Version, versionBranch)
 import Data.Unique(Unique, hashUnique)
 
--- for reading the bytes of ByteStrings:
-import System.IO.Unsafe (unsafeDupablePerformIO)
-
 -- For getting our Int from ThreadId:
 import Foreign.C (CInt(..))
 import GHC.Conc(ThreadId(..))
@@ -94,6 +91,21 @@ import MachDeps
 #endif
 
 import Unsafe.Coerce
+
+-- for reading the bytes of ByteStrings:
+# if MIN_VERSION_bytestring(0,10,6)
+-- This eliminates ~5ns overhead vs unsafeDupablePerformIO. We don't understand
+-- the implications but will use it in the same way it's used in ByteString.
+import Data.ByteString.Internal(accursedUnutterablePerformIO)
+# else
+import System.IO.Unsafe (unsafeDupablePerformIO)
+
+----------------------------- END IMPORTS --------------------------------
+
+accursedUnutterablePerformIO :: IO a -> a
+accursedUnutterablePerformIO = unsafeDupablePerformIO
+# endif
+
 
 -- COMMENTED BELOW, WHEN FOUND NOT BENEFICIAL:
 -- These should be fine in all cases:
@@ -1146,20 +1158,110 @@ instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d
 --   - :: Word64 -> (Word32,Word32)  for 32-bit machines.
 
 -- TODO PERFORMANCE:
---   consider the accursedUnutterablePerformIO bullshit from bytestring; shaves off 4ns here:
+--   x try using peek, where: peekByteOff addr off = peek (addr `plusPtr` off)
+--     (if it works add elsewhere)
+--   - when we have branch pred test:
+--     x try doing single conditional check at beginning to determine code path to take (whether we can skip hashRemainingBytes)
+--     x can we do branchless be using a function pointer (or a haskell array of functions)?
+--     - also make preferential use of mix16/mix32
+--       - we can enumerate all possibilities with a case, matching all rem bytes 0-7.
+--   X try moving unsafe calls closer into branches make things not in monad
+--    X  (then test again with unsafeDupablePerformIO
+--   - look again at core
+--   - consider Text improvements
+--   - try again making hash8ByteLoop a totally self-recursive function, or combine with hashRemainingBytes
+
 
 -- This is about twice as fast as a loop with single byte peeks:
 hashByteString :: (HashState h)=> h -> B.ByteString -> h
 {-# INLINE hashByteString #-}
-hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
+hashByteString h = \(B.PS fp off lenBytes) ->
+  -- similar to: https://github.com/haskell/bytestring/blob/dd3c07d115840d13482426a0084a39201eb6b6d4/Data/ByteString/Unsafe.hs#L78
+  -- 'hashable' also uses this.
+  accursedUnutterablePerformIO $
       withForeignPtr fp $ \base ->
         let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
+            !ixOutOfBounds = off+lenBytes
             -- index where we begin to read (bytesRem < 8) individual bytes:
-            !bytesIx = off+lenBytes-bytesRem
-            !ixFinal = off+lenBytes-1
+            !bytesIx = ixOutOfBounds-bytesRem
 
             hash8ByteLoop !hAcc !ix 
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
+                | otherwise     = assert (ix < bytesIx) $ do
+                    -- TODO do we need to worry about alignment constraints for peek here?
+                    --    Test with new bytestring, and using 'drop' 1, 2, 3 etc
+                    --    Also benchmark these.
+                    -- TODO PERFORMANCE: especially if above is necessary:
+                    --    try eliminating a branch advancing ix by 0 for remaining byts of a word, so we replicate last byte
+                    w64Dirty <- peekByteOff base ix
+                    let w64 = if littleEndian
+                                then byteSwap64 w64Dirty
+                                else w64Dirty
+
+                    hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
+
+            hashRemainingBytes !hAcc !ix 
+                | ix == ixOutOfBounds = return hAcc
+                | otherwise = assert (ix < ixOutOfBounds) $ do
+                    byt <- peekByteOff base ix
+                    hashRemainingBytes (hAcc `mix8` byt) (ix+1)
+
+         in hash8ByteLoop h off 
+
+{- 
+import Foreign.Ptr (castPtr, plusPtr)
+import Foreign.Storable (peek)
+
+-- This is about twice as fast as a loop with single byte peeks:
+hashByteString :: (HashState h)=> h -> B.ByteString -> h
+{-# INLINE hashByteString #-}
+hashByteString h = \(B.PS fp off lenBytes) ->
+  -- similar to: https://github.com/haskell/bytestring/blob/dd3c07d115840d13482426a0084a39201eb6b6d4/Data/ByteString/Unsafe.hs#L78
+  accursedUnutterablePerformIO $
+      withForeignPtr fp $ \base ->
+        let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
+            !ix0 = base `plusPtr` off
+            !ixOutOfBounds = ix0 `plusPtr` lenBytes
+            -- index where we begin to read (bytesRem < 8) individual bytes:
+            !bytesIx = ixOutOfBounds `plusPtr` negate bytesRem
+
+            hash8ByteLoop !hAcc !ix 
+                | ix == bytesIx = hashRemainingBytes hAcc (castPtr bytesIx)
+                | otherwise     = assert (ix < bytesIx) $ do
+                    w64Dirty <- peek ix -- (base `plusPtr` ix)
+                    let w64 = if littleEndian
+                                then byteSwap64 w64Dirty
+                                else w64Dirty
+
+                    hash8ByteLoop (hAcc `mix64` w64) (ix `plusPtr` 8)
+
+            hashRemainingBytes !hAcc !ix 
+                | ix == ixOutOfBounds = return hAcc
+                | otherwise = assert (ix < ixOutOfBounds) $ do
+                    byt <- peek ix
+                    hashRemainingBytes (hAcc `mix8` byt) (ix `plusPtr` 1)
+
+         in hash8ByteLoop h ix0
+-}
+{- FAILED UNFOLDING EXPERIMENT #1
+-- import GHC.Prim(tagToEnum#)
+
+-- This is about twice as fast as a loop with single byte peeks:
+hashByteString :: (HashState h)=> h -> B.ByteString -> h
+{-# INLINE hashByteString #-}
+hashByteString h = \(B.PS fp off lenBytes) ->
+  -- similar to: https://github.com/haskell/bytestring/blob/dd3c07d115840d13482426a0084a39201eb6b6d4/Data/ByteString/Unsafe.hs#L78
+  accursedUnutterablePerformIO $
+    withForeignPtr fp $ \base ->
+        let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
+            !word64Chunks = lenBytes `unsafeShiftR` 3 -- `div` 8
+            !ixOutOfBounds = off+lenBytes
+            -- index where we begin to read (bytesRem < 8) individual bytes:
+            !bytesIx = ixOutOfBounds-bytesRem
+
+            hash8ByteLoop !hAcc !ix 
+                | ix == bytesIx = return hAcc
+             -- | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
                     w64Dirty <- peekByteOff base ix
                     let w64 = if littleEndian
@@ -1167,15 +1269,60 @@ hashByteString h = \(B.PS fp off lenBytes) -> unsafeDupablePerformIO $
                                 else w64Dirty
 
                     hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
-            
+
             hashRemainingBytes !hAcc !ix 
-                | ix > ixFinal  = return hAcc 
-                | otherwise     = assert (ix <= ixFinal) $ do
+                | ix == ixOutOfBounds = return hAcc
+                | otherwise = assert (ix < ixOutOfBounds) $ do
                     byt <- peekByteOff base ix
                     hashRemainingBytes (hAcc `mix8` byt) (ix+1)
-        
-         in hash8ByteLoop h off 
 
+    -- TODO - Inline,
+    --      - try nested, non-tuple case
+    --      - move accursed... into here
+    --      - tagToEnum to get jump table
+         in case tagToEnum word64Chunks of
+            N0-> case tagToEnum bytesRem of
+            -- small, no need for hash8ByteLoop
+                  N1 -> mix8 h <$> peekByteOff base off
+                  N2 -> mix16 h <$> peekByteOff base off
+                  N3 -> do
+                    hAcc <- mix16 h <$> peekByteOff base off
+                    mix8 hAcc <$> peekByteOff base (off+2)
+                  N4 -> mix32 h <$> peekByteOff base off
+                  N5 -> do
+                    hAcc <- mix32 h <$> peekByteOff base off
+                    mix8 hAcc <$> peekByteOff base (off+4)
+                  N6 -> do
+                    hAcc <- mix32 h <$> peekByteOff base off
+                    mix16 hAcc <$> peekByteOff base (off+4)
+                  _ -> assert (bytesRem == 7) $ do
+                    hAcc <- mix32 h <$> peekByteOff base off
+                    hAcc' <- mix16 hAcc <$> peekByteOff base (off+4)
+                    mix8 hAcc' <$> peekByteOff base (off+6)
+              -- no need for hashRemainingBytes
+            _ -> case bytesRem of
+                   0 -> hash8ByteLoop h off
+                   _ -> error "TODO"
+              -- for some word64 chunks:
+              -- (1, _) -> 
+              -- (2, _) -> 
+              -- (3, _) ->
+              -- (4, _) ->
+              -- (5, _) ->
+              -- (6, _) ->
+              -- (7, _) ->
+
+tagToEnum :: Int -> N
+{-# INLINE tagToEnum #-}
+tagToEnum (I# i#) = tagToEnum# i# :: N
+data N = N0 | N1 | N2 | N3 | N4 | N5 | N6 | N7 | N8
+-}
+
+
+-- TODO PERFORMANCE:
+--   copy ByteString benchmark
+--   try out an incorrect version with mix64
+--     if faster try out mix64 with proper endian adjustments.
 
 -- NOTE: we can't simply call hashByteArray here; Text is stored as
 -- machine-endian UTF-16 (as promised by public Data.Text.Foreign), so we need

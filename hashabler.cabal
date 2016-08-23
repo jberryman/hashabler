@@ -157,7 +157,7 @@ benchmark viz
   type: exitcode-stdio-1.0
   default-language:    Haskell2010
   main-is:             Main.hs
-  ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
+  ghc-options:         -O2 -threaded -funbox-strict-fields
   hs-source-dirs:      viz
   if flag(dev)
       buildable: True
@@ -185,12 +185,13 @@ benchmark core
       build-depends:       
            base
          , hashabler
+         , bytestring
   else 
       buildable: False
 
   if flag(dev)
       ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
-      ghc-options: -O2  -rtsopts  
+      ghc-options: -O2  -rtsopts -funbox-strict-fields
  
   -- Either do threaded for eventlogging and simple timing...
   --ghc-options: -threaded -eventlog

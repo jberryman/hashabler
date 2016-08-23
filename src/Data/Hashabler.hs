@@ -35,6 +35,7 @@ module Data.Hashabler (
 -}
   , SipKey(..)
   , siphash64
+  , siphash64_1_3
   , siphash128
 
   -- ** Hashing with the FNV-1a algorithm

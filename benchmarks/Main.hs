@@ -424,6 +424,15 @@ hashableBenchmarkSiphash64 =
               , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs512
               , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bs1Mb
               ]
+            , bgroup "strict (with siphash-1-3)" -- TODO make proper benchmark set for siphash64_1_3
+              [ bench "5" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs5
+              , bench "8" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs8
+              , bench "11" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs11
+              , bench "40" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs40
+              , bench "128" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs128
+              , bench "512" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs512
+              , bench "2^20" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs1Mb
+              ]
             , bgroup "lazy"
                 [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl5
                 , bench "8" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl8
@@ -454,6 +463,15 @@ hashableBenchmarkSiphash64 =
               , bench "128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t128
               , bench "512" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t512
               , bench "2^20" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) t1Mb
+              ]
+            , bgroup "strict (with siphash-1-3)" -- TODO make proper benchmark set for siphash64_1_3
+              [ bench "5" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t5
+              , bench "8" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t8
+              , bench "11" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t11
+              , bench "40" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t40
+              , bench "128" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t128
+              , bench "512" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t512
+              , bench "2^20" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) t1Mb
               ]
             , bgroup "lazy"
               [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) tl5

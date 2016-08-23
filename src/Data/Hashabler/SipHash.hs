@@ -2,6 +2,7 @@
 {-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
 module Data.Hashabler.SipHash (
     siphash64
+  , siphash64_1_3
   , siphash128
   , SipKey(..)
   ) where
@@ -101,11 +102,27 @@ data SipState = SipState {
                   , inlen :: !Word64  -- ^ we'll accumulate this as we consume
                   } deriving Eq
 
-instance HashState SipState where
-    mix8 st m = siphashForWord st m
-    mix16 st m = siphashForWord st m
-    mix32 st m = siphashForWord st m
-    mix64 st m = siphashForWord st m
+-- NOTE: we tried to include cROUNDS in SipState and let cROUNDS and dROUNDS be
+-- specified directly by the user at the call-site, but couldn't figure out how
+-- to avoid a performance regression. Instead for now we use this unfortunate
+-- scheme, and duplicate the body of siphash64 for siphash64_1_3.
+
+
+-- Wrappers for different cROUNDS:
+newtype Sip_2 = Sip_2 SipState
+newtype Sip_1 = Sip_1 SipState
+
+instance HashState Sip_2 where
+    mix8  (Sip_2 st) m = Sip_2 $ siphashForWord 2 st m
+    mix16 (Sip_2 st) m = Sip_2 $ siphashForWord 2 st m
+    mix32 (Sip_2 st) m = Sip_2 $ siphashForWord 2 st m
+    mix64 (Sip_2 st) m = Sip_2 $ siphashForWord 2 st m
+
+instance HashState Sip_1 where
+    mix8  (Sip_1 st) m = Sip_1 $ siphashForWord 1 st m
+    mix16 (Sip_1 st) m = Sip_1 $ siphashForWord 1 st m
+    mix32 (Sip_1 st) m = Sip_1 $ siphashForWord 1 st m
+    mix64 (Sip_1 st) m = Sip_1 $ siphashForWord 1 st m
 
 
 -- Corresponds to body of loop:
@@ -125,9 +142,9 @@ siphashForWord :: (Integral m,
 #                  else
                     Bits m
 #                  endif
-                   )=> SipState -> m -> SipState
+                   )=> Int -> SipState -> m -> SipState
 {-# INLINE siphashForWord #-}
-siphashForWord (SipState{ .. }) m = runIdentity $
+siphashForWord cROUNDS (SipState{ .. }) m = runIdentity $
   assert (bytesRemaining > 0 && bytesRemaining <= 8) $
     case compare bytesRemaining mSize of
          -- room in mPart with room leftover
@@ -182,7 +199,7 @@ siphashForWord (SipState{ .. }) m = runIdentity $
     sipMix v0 v1 v2 v3 m = do
         v3 <- return $ v3 `xor` m
      -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
-        (v0,v1,v2,v3) <- sipRounds 2 v0 v1 v2 v3
+        (v0,v1,v2,v3) <- sipRounds cROUNDS v0 v1 v2 v3
 
         v0 <- return $ v0 `xor` m
         return (v0,v1,v2,v3)
@@ -194,12 +211,15 @@ siphashForWord (SipState{ .. }) m = runIdentity $
 --     -Look for eliminating `case`
 --  - fiddling w/ ptr arith and unsafe bullshit thing in bytestring instance.
 --  x play with tagToEnum in siphashForWord
---  - move as much work as possible to the left of \a-> so it can be calculated once.
 
 -- | An implementation of 64-bit siphash-2-4.
 --
 -- This function is fast on 64-bit machines, and provides very good hashing
 -- properties and protection against hash flooding attacks.
+--
+-- This uses the \"standard\" recommended parameters of 2 and 4 rounds,
+-- recommended by the original paper, but 'siphash64_1_3' may be a faster and
+-- equally secure choice.
 siphash64 :: Hashable a => SipKey -> a -> Hash64 a
 {-# INLINE siphash64 #-}
 siphash64 (SipKey k0 k1) = \a-> runIdentity $ do
@@ -217,7 +237,7 @@ siphash64 (SipKey k0 k1) = \a-> runIdentity $ do
     let mPart = 0
         bytesRemaining = 8
         inlen = 0
-    SipState{ .. } <- return $ hash (SipState { .. }) a
+    (Sip_2 SipState{ .. }) <- return $ hash (Sip_2 $ SipState { .. }) a
 
     let !b = inlen `unsafeShiftL` 56
     b <- return $ b .|. mPart
@@ -235,6 +255,48 @@ siphash64 (SipKey k0 k1) = \a-> runIdentity $ do
 
     return $! Hash64 $! v0 `xor` v1 `xor` v2 `xor` v3
 
+
+
+-- | An implementation of 64-bit siphash-1-3.
+--
+-- This is somewhat faster than siphash-2-4 (implemented in 'siphash64'), while
+-- the authors claim it should still offer good protection against known
+-- attacks. This is currently the standard hash function used in the Rust
+-- language.
+siphash64_1_3 :: Hashable a => SipKey -> a -> Hash64 a
+{-# INLINE siphash64_1_3 #-}
+siphash64_1_3 (SipKey k0 k1) = \a-> runIdentity $ do
+    let v0 = 0x736f6d6570736575
+        v1 = 0x646f72616e646f6d
+        v2 = 0x6c7967656e657261
+        v3 = 0x7465646279746573
+
+    v3 <- return $ v3 `xor` k1;
+    v2 <- return $ v2 `xor` k0;
+    v1 <- return $ v1 `xor` k1;
+    v0 <- return $ v0 `xor` k0;
+
+    -- Initialize rest of SipState:
+    let mPart = 0
+        bytesRemaining = 8
+        inlen = 0
+    (Sip_1 SipState{ .. }) <- return $ hash (Sip_1 $ SipState { .. }) a
+
+    let !b = inlen `unsafeShiftL` 56
+    b <- return $ b .|. mPart
+
+    v3 <- return $ v3 `xor` b
+    -- for( i=0; i<cROUNDS; ++i ) SIPROUND;
+    (v0,v1,v2,v3) <- sipRounds 1 v0 v1 v2 v3
+    v0 <- return $ v0 `xor` b
+
+    -- 0xff may be "Any non-zero value":
+    v2 <- return $ v2 `xor` 0xff
+
+--   for( i=0; i<dROUNDS; ++i ) SIPROUND;
+    (v0,v1,v2,v3) <- sipRounds 3 v0 v1 v2 v3
+
+    return $! Hash64 $! v0 `xor` v1 `xor` v2 `xor` v3
 
 
 -- TODO if we extend this approach beyond 128-bits, then re-combine as much as
@@ -264,7 +326,7 @@ siphash128 (SipKey k0 k1) = \a-> runIdentity $ do
     let mPart = 0
         bytesRemaining = 8
         inlen = 0
-    SipState{ .. } <- return $ hash (SipState { .. }) a
+    (Sip_2 SipState{ .. }) <- return $ hash (Sip_2 $ SipState { .. }) a
 
     let !b = inlen `unsafeShiftL` 56
     b <- return $ b .|. mPart

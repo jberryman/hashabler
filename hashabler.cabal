@@ -72,7 +72,7 @@ library
       CPP-Options:     -DEXPORT_INTERNALS
   if flag(instrumented)
       ghc-options:     -fno-ignore-asserts
-      ghc-prof-options: -fprof-auto -auto-all -caf-all "-with-rtsopts=-xc"
+      ghc-prof-options: -fprof-auto -auto-all -caf-all
 
   exposed-modules:     Data.Hashabler
   other-modules:       MachDeps, Data.Hashabler.Internal, Data.Hashabler.SipHash

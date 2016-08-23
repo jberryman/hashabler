@@ -1,3 +1,8 @@
+1.3.0
+---
+* Performance improvements
+* Implement a faster siphash-1-3
+
 1.2.1
 ---
 * Eq, Read, Show for SipKey

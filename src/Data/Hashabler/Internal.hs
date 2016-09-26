@@ -72,7 +72,9 @@ import GHC.Integer.GMP.Internals (BigNat(BN#))
 #if MIN_VERSION_base(4,8,0)
 import Data.Void (Void, absurd)
 import GHC.Natural (Natural(..))
+# ifdef MIN_VERSION_integer_gmp
 import GHC.Exts (Word(..))
+# endif
 #endif
 
 -- For WORD_SIZE_IN_BITS constant:
@@ -616,7 +618,8 @@ hash32BigNatByteArrayBytes h numLimbs ba =
 instance Hashable Natural where
     {-# INLINE hash #-}
     hash h nat = case nat of
-# if defined (MIN_VERSION_integer_gmp) && MIN_VERSION_integer_gmp(1,0,0)
+# if defined (MIN_VERSION_integer_gmp)
+#   if MIN_VERSION_integer_gmp(1,0,0)
         -- For Word-size natural
         (NatS# wd#) -> mixConstructor 0 $
 #         if WORD_SIZE_IN_BITS == 32
@@ -626,9 +629,13 @@ instance Hashable Natural where
 #         endif
         -- Else using a BigNat (which instance calls required mixConstructor):
         (NatJ# bn)  -> hash h bn
+#   else
+        -- Natural represented with non-negative Integer:
+        n -> hash h $ toInteger n
+#   endif
 # else
         -- Natural represented with non-negative Integer:
-        (Natural n) -> hash h n
+        n -> hash h $ toInteger n
 # endif
 
 -- This is the instance in void-0.7:

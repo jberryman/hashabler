@@ -161,9 +161,10 @@ module Data.Hashabler (
   , hashLeftUnfolded
   , magnitudeAsWord
   , FNV32(..), FNV64(..)
-  , bytes32, bytes64, floatToWord, doubleToWord
+  , bytes32, bytes64
   , _byteSwap32, _byteSwap64, _hash32Integer, _hash32_Word_64, _hash32_Int_64
   , _bytes64_32 , _bytes64_64, _signByte
+  , clean8ByteChunk
   , assertionCanary
 #endif
     ) where

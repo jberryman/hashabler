@@ -34,11 +34,6 @@ import Foreign.Storable (peekByteOff)
 
 import Control.Exception(assert)
 
--- For casting of floating point values:
-import Data.Array.ST (newArray, readArray, MArray, STUArray)
-import Data.Array.Unsafe (castSTUArray)
-import GHC.ST (runST, ST)
-
 import Data.Version(Version, versionBranch)
 import Data.Unique(Unique, hashUnique)
 
@@ -235,25 +230,10 @@ _bytes64_32 wd =
         (b4,b5,b6,b7) = bytes32 wd1
      in (b0,b1,b2,b3,b4,b5,b6,b7)
 
--- TODO can this be done more efficiently on 32-bit machines?
+-- TODO this more efficiently on 32-bit platforms where this is I think a noop.
 words32 :: Word64 -> (Word32, Word32)
 {-# INLINE words32 #-}
 words32 wd64 = (fromIntegral $ unsafeShiftR wd64 32, fromIntegral wd64)
-
--- These appear to return bytes in big endian on my machine (little endian),
--- but TODO verify what happens on a BE machine.
--- See: http://stackoverflow.com/a/7002812/176841 . 
--- Someone just kill me now...
-floatToWord :: Float -> Word32
-floatToWord x = runST (castViaSTArray x)
-
-doubleToWord :: Double -> Word64
-doubleToWord x = runST (castViaSTArray x)
-
-castViaSTArray :: (MArray (STUArray s) a (ST s),
-                   MArray (STUArray s) b (ST s)) => a -> ST s b
-{-# INLINE castViaSTArray #-}
-castViaSTArray x = newArray (0 :: Int,0) x >>= castSTUArray >>= flip readArray 0
 
 
 -- HASHABLE CLASS AND INSTANCES -------------------------------------
@@ -707,19 +687,21 @@ _hash32_Word_64 h = \w->
 
 
 
--- | Hash a Float as IEEE 754 single-precision format bytes. This is terribly
--- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
+-- | Hash a Float by way of 'decodeFloat'. __NOTE__: this means 0 and -0 are
+-- considered equal, among other things. In general floating point values
+-- cannot be reasonably compared for absolute equality, so be careful if you
+-- make use of this instance. 
 instance Hashable Float where
     {-# INLINE hash #-}
-    hash h = \x-> assert (isIEEE x) $
-        mix32 h $ floatToWord x
+    hash h = hash h . (\x-> decodeFloat x)
 
--- | Hash a Double as IEEE 754 double-precision format bytes. This is terribly
--- slow; direct complaints to http://hackage.haskell.org/trac/ghc/ticket/4092
+-- | Hash a Double by way of 'decodeFloat'. __NOTE__: this means 0 and -0 are
+-- considered equal, among other things. In general floating point values
+-- cannot be reasonably compared for absolute equality, so be careful if you
+-- make use of this instance. 
 instance Hashable Double where
     {-# INLINE hash #-}
-    hash h = \x-> assert (isIEEE x) $
-        mix64 h $ doubleToWord x
+    hash h = hash h . (\x-> decodeFloat x)
 
 
 -- GHC uses two's complement representation for signed ints; C has this
@@ -1081,9 +1063,9 @@ instance StableHashable Void where
 instance (Integral a, StableHashable a) => StableHashable (Ratio a) where
     typeHash = mixType (TypeHash 330184177609460989)
 instance StableHashable Float where
-    typeHash = TypeHash 7785239337948379302
+    typeHash = TypeHash 4320606117681153984
 instance StableHashable Double where
-    typeHash = TypeHash 12403185125095650454
+    typeHash = TypeHash 8849395475307970354
 instance StableHashable Int8 where
     typeHash = TypeHash 17471749136236681265
 instance StableHashable Int16 where
@@ -1196,15 +1178,10 @@ hashByteString h = \(B.PS fp off lenBytes) ->
                 | ix == bytesIx = hashRemainingBytes hAcc bytesIx
                 | otherwise     = assert (ix < bytesIx) $ do
                     -- TODO do we need to worry about alignment constraints for peek here?
-                    --    Test with new bytestring, and using 'drop' 1, 2, 3 etc
-                    --    Also benchmark these.
                     -- TODO PERFORMANCE: especially if above is necessary:
                     --    try eliminating a branch advancing ix by 0 for remaining byts of a word, so we replicate last byte
                     w64Dirty <- peekByteOff base ix
-                    let w64 = if littleEndian
-                                then byteSwap64 w64Dirty
-                                else w64Dirty
-
+                    let w64 = clean8ByteChunk w64Dirty
                     hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
 
             hashRemainingBytes !hAcc !ix 
@@ -1214,6 +1191,8 @@ hashByteString h = \(B.PS fp off lenBytes) ->
                     hashRemainingBytes (hAcc `mix8` byt) (ix+1)
 
          in hash8ByteLoop h off 
+
+
 
 {- 
 import Foreign.Ptr (castPtr, plusPtr)
@@ -1377,10 +1356,7 @@ hashByteArray h !lenBytes ba =
             | ix == bytesIxWd = hashRemainingBytes hAcc bytesIx
             | otherwise     = assert (ix < bytesIxWd) $
                     let w64Dirty = P.indexByteArray ba ix
-                        w64 = if littleEndian
-                                then byteSwap64 w64Dirty
-                                else w64Dirty
-
+                        w64 = clean8ByteChunk w64Dirty
                      in hash8ByteLoop (hAcc `mix64` w64) (ix + 1)
         
         hashRemainingBytes !hAcc !ix 
@@ -1390,7 +1366,24 @@ hashByteArray h !lenBytes ba =
                  in hashRemainingBytes (hAcc `mix8` b0) (ix+1)
      in hash8ByteLoop h 0 
 
-
+-- Take the result of doing a read of a Word64 (e.g. by indexByteArray) and
+-- convert it into the value of that memory location in big endian. This must
+-- take into account endianness as well as understanding of how ghc/ghcjs
+-- stores a Word64 on a 32-bit platform.
+clean8ByteChunk :: Word64 -> Word64
+{-# INLINE clean8ByteChunk #-}
+clean8ByteChunk w64Dirty 
+  | littleEndian = 
+#    if WORD_SIZE_IN_BITS == 64
+      byteSwap64 w64Dirty
+#    else
+      let (w32Dirty_0, w32Dirty_1) = words32 w64Dirty
+          w64_0 = (fromIntegral $ byteSwap32 w32Dirty_0) `unsafeShiftL` 32
+          w64_1 =  fromIntegral $ byteSwap32 w32Dirty_1
+       in w64_0 .|. w64_1
+#    endif
+  | otherwise = w64Dirty
+-- TODO test on both bytearray and bytestrings [1..8], and check on 
 
 
 ---------------- LIST INSTANCE SCRATCH WORK:

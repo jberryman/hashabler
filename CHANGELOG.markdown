@@ -1,3 +1,10 @@
+2.0.0
+---
+* Use `decodeFloat` for Float and Double, for sanity and consistency with
+  ghcjs. Hash values for these typed have changed.
+* Fix integer-gmp flag and support ghcjs (thanks to roelvandijk!)
+
+
 1.3.0
 ---
 * Performance improvements

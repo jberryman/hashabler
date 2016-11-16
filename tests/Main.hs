@@ -39,7 +39,10 @@ import GHC.Natural (Natural)
 import System.IO.Unsafe(unsafeDupablePerformIO)
 import Prelude
 
-import Data.Bits(xor)
+import Data.Bits
+import qualified Data.ByteString.Internal as B
+import Foreign.ForeignPtr (withForeignPtr)
+import Foreign.Storable (peekByteOff)
 
 main :: IO ()
 main = do
@@ -56,7 +59,7 @@ main = do
                 putStrLn "Current implementation does not match existing test vectors. Are you sure you want to re-generate them? [y/n]: "
                 yn <- getChar
                 if yn == 'y'
-                    then putStrLn "Ok, regenerating. NOTE: YOU MUST BUMP MAJOR VERSION NUMBER!"
+                    then putStrLn "Ok, regenerating. NOTE: YOU MUST BUMP MAJOR VERSION NUMBER AND TYPEHASH!"
                     else error "Exiting without regenerating test vectors."
             regenerateVectors (if null these then Nothing else Just these)
          _ -> testsMain
@@ -172,33 +175,8 @@ checkSiphashSanity = test "SipHash sanity" $ do
             ]
 
 
--- Helpers for below:
-bytesFloat :: Float -> (Word8,Word8,Word8,Word8)
-{-# INLINE bytesFloat #-}
-bytesFloat = bytes32 . floatToWord
-
-bytesDouble :: Double -> (Word8,Word8,Word8,Word8,Word8,Word8,Word8,Word8)
-{-# INLINE bytesDouble #-}
-bytesDouble = bytes64 . doubleToWord
-
-
 checkMiscUnitTests :: IO ()
 checkMiscUnitTests = do
-    -- Basic unit tests for Float, with IEEE byte values pulled from this
-    -- calculator: http://www.h-schmidt.net/FloatConverter/IEEE754.html
-    test "Getting bytes from Float" $
-        let fl = -8.4884356e-11
-            flBytes = bytesFloat fl
-         in unless (flBytes == (0xae, 0xba, 0xa9, 0xa5)) $
-              error $ "bytesFloat: "++(show fl)++" /=  "++(show flBytes)
-
-    -- http://www.binaryconvert.com/result_double.html?hexadecimal=ADBABEAA88AB7FD7
-    test "Getting bytes from Double" $
-        let dbl = -2.10068275286355115215868722646e-88
-            dblBytes = bytesDouble dbl
-         in unless ( dblBytes == (0xAD, 0xBA, 0xBE, 0xAA, 0x88, 0xAB, 0x7F, 0xD7)) $
-              error $ "bytesDouble: "++(show dbl)++" /= "++(show dblBytes)
-
     test "Bool" $
         unless (hashFNV32 (fromBool True :: Word8) == (untag32 $ hashFNV32 True)
                && hashFNV32 (fromBool False :: Word8) == (untag32 $ hashFNV32 False)) $
@@ -211,6 +189,21 @@ checkMiscUnitTests = do
             y = _byteSwap64 0x1234567821436587
          in unless (x == 0x78563412 && y == 0x8765432178563412) $ 
               error $ "Problem with byteSwap: "++(show x)++" "++(show y)
+
+    test "clean8ByteChunk" $ do
+      let target = foldr (.|.) 0 $ zipWith shiftL [1..8] [56,48..]
+          ba = packByteArray $ take 8 [1..]
+          w64Dirty = P.indexByteArray ba 0
+          w64 = clean8ByteChunk w64Dirty
+      unless (w64 == target) $
+        error $ "clean8ByteChunk bytearray: "++(show (w64Dirty,w64,target))
+
+      let (B.PS fp _ _) = B.pack $ take 8 [1..]
+      withForeignPtr fp $ \base -> do
+        w64' <- clean8ByteChunk <$> peekByteOff base 0
+        unless (w64' == target) $
+          error $ "clean8ByteChunk bytearray: "++(show (w64Dirty,w64',target))
+
 
     quickCheckErr 1000 checkSignByte
     quickCheckErr 1000 checkIntegerFallback
@@ -283,7 +276,7 @@ checkHashableInstances = do
                    (hashFNV32 nat) == 
                    (untag32 $ hashFNV32 bytesBE) -- against instance [Word8]
                       
-        flip forAll checkNat $ do
+        forAll' checkNat $ do
             let maxWidth = 100 -- nibbles
             w <- growingElements [1..maxWidth]
             -- a random hex string, dropping any leading zeros:
@@ -294,28 +287,28 @@ checkHashableInstances = do
 
     -- Check that equivalent strict and lazy ByteStrings (of varying chunk
     -- sizes) hash to the same:
-    quickCheckErr 100 $ do
-        let checkBS (bs,chunkSize) = 
+    quickCheckErr 50 $ do
+        let checkBS (Positive bs,Positive chunkSize) = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
                   bsLazyChunked = BL.fromChunks $ map B.pack $ chunk chunkSize wd8s
                in (hashFNV32 bsStrict) ==
                   (untag32 $ hashFNV32 bsLazyChunked)
-        flip forAll checkBS $ do
+        forAll' checkBS $ do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
             chunkSize <- choose (1,maxBytes+1)
-            return (bs,chunkSize)
+            return (Positive bs,Positive chunkSize)
 
     -- ...likewise for Text
-    quickCheckErr 100 $ do
+    quickCheckErr 50 $ do
         let checkBS (bs,chunkSize) = 
               let cs = take bs $ cycle $ take 199 $ iterate succ '0'
                   bsStrict = T.pack cs
                   bsLazyChunked = TL.fromChunks $ map T.pack $ chunk chunkSize cs
                in (hashFNV32 bsStrict) ==
                   (untag32 $ hashFNV32 bsLazyChunked)
-        flip forAll checkBS $ do
+        forAll' checkBS $ do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
             chunkSize <- choose (1,maxBytes+1)
@@ -323,67 +316,67 @@ checkHashableInstances = do
 
 #  if MIN_VERSION_bytestring(0,10,4)
     -- Check that ShortByteStrings hash like big strict ones:
-    quickCheckErr 100 $ do
+    quickCheckErr 50 $ do
         let checkBS bs = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
                   bsShort  = BSh.pack wd8s
                in (hashFNV32 bsStrict) ==
                   (untag32 $ hashFNV32 bsShort)
-        flip forAll checkBS $ do
+        forAll' checkBS $ do
             let maxBytes = 1000*1000
             growingElements [1..maxBytes]
 #  endif
     
     -- Check that ByteStrings hash like [Word8]
-    quickCheckErr 100 $ do
-        let checkBS bs = 
+    quickCheckErr 50 $ do
+        let checkBS (Positive bs) = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
                in (hashFNV32 bsStrict) ==
                   (untag32 $ hashFNV32 wd8s)
-        flip forAll checkBS $ do
+        forAll' checkBS $ do
             let maxBytes = 1000*1000
-            growingElements [1..maxBytes]
+            Positive <$> growingElements [1..maxBytes]
 
     -- Check that P.ByteArrays hash like [Word8]
-    quickCheckErr 100 $ do
-        let checkBA bs = 
+    quickCheckErr 50 $ do
+        let checkBA (Positive bs) = 
               let wd8s = take bs $ iterate (+1) 0
                   byteArr = packByteArray wd8s
                in (hashFNV32 byteArr) ==
                   (untag32 $ hashFNV32 wd8s)
-        flip forAll checkBA $ do
+        forAll' checkBA $ do
             let maxBytes = 1000*1000
-            growingElements [1..maxBytes]
+            Positive <$> growingElements [1..maxBytes]
     
     -- Check that ByteStrings hash like [Word8], after some arbitrary
     -- equivalent transformations (we mainly want to exercise handling of the
     -- length and offset in the ByteString internals)
-    quickCheckErr 100 $ do
-        let checkBS (bs,takeVal,dropVal) = 
+    quickCheckErr 50 $ do
+        let checkBS (Positive bs,Positive takeVal,Positive dropVal) = 
               let wd8s = take bs $ iterate (+1) 0
                   b = B.take takeVal $ B.drop dropVal $ B.pack wd8s
                   l =   take takeVal $   drop dropVal $        wd8s
                in (hashFNV32 b) ==
                   (untag32 $ hashFNV32 l)
-        flip forAll checkBS $ do
+        forAll' checkBS $ do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
             takeVal <- growingElements [1..(maxBytes*2)]
             dropVal <- growingElements [1..(maxBytes*2)]
-            return (bs,takeVal,dropVal)
+            return (Positive bs,Positive takeVal,Positive dropVal)
 
     -- Check that Text is hashed in big endian, making sure we get some
     -- double-size codes, by encoding as a ByteString and comparing the hashes
     -- of both
     quickCheckErr 100 $ do
         let checkBS largeCs = 
-              let t = T.pack $ map (toEnum . clean . getLarge) largeCs
+              let t = T.pack $ map (toEnum . clean . getLarge . getPositive) largeCs
                   clean = (`mod` fromEnum (maxBound :: Char))
                   bs = T.encodeUtf16BE t
                in (hashFNV32 t) == (untag32 $ hashFNV32 bs)
-        flip forAll checkBS $ do
+        forAll' checkBS $ do
             let maxChars = 1000
             w <- growingElements [1..maxChars]
             -- Note: some of these characters will be in the reserved range and
@@ -407,7 +400,7 @@ checkHashableInstances = do
     quickCheckErr 100 $ checkCollisionsOf (undefined :: Ordering) 9
     quickCheckErr 100 $ checkCollisionsOf (undefined :: Either () ()) 4
     quickCheckErr 100 $ checkCollisionsOf (undefined :: Maybe ()) 4
-    quickCheckErr 100 $ checkCollisionsOf (undefined :: [()]) 10000
+    quickCheckErr 50 $ checkCollisionsOf (undefined :: [()]) 10000
     quickCheckErr 100 $ checkCollisionsOf (undefined :: TreeOfSums1) 100
     quickCheckErr 100 $ checkCollisionsOf (undefined :: TreeOfSums2) 1000
     quickCheckErr 100 $ checkCollisionsOf (undefined :: TreeOfSums3) 9
@@ -515,6 +508,8 @@ quickCheckErr n p =
 
   where maybeErr (Success _ _ _) = return ()
         maybeErr e = error $ show e
+
+forAll' f g = forAllShrink g shrink f
 
 packByteArray :: [Word8] -> P.ByteArray
 {-# NOINLINE packByteArray #-}

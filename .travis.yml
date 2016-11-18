@@ -32,7 +32,11 @@ before_install:
 install:
  - travis_retry cabal update
  - sed -i 's/^jobs:/-- jobs:/' ${HOME}/.cabal/config
- - test -z "$MAYBE_GHCJS" || (test -x $HOME/.cabal/bin/ghcjs  || (cabal install http://ghcjs.luite.com/master.tar.gz && ghcjs-boot))
+ - test -z "$MAYBE_GHCJS" || (
+     test -x $HOME/.cabal/bin/ghcjs || cabal install https://s3.amazonaws.com/jberryman-ghcjs-travis/master.tar.gz ;
+     test -e $HOME/.cabal/dot_ghcjs.tar.gz || wget -O $HOME/.cabal/dot_ghcjs.tar.gz  https://s3.amazonaws.com/jberryman-ghcjs-travis/ghcjs_please_dont_use_my_bandwidth.tar.gz ;
+     tar xf $HOME/.cabal/dot_ghcjs.tar.gz -C $HOME ;
+    )
  - cabal install $MAYBE_GHCJS --only-dependencies --enable-tests -fdev
 
 script:

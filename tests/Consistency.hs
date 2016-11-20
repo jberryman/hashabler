@@ -10,9 +10,11 @@ import System.Random
 
 
 #if MIN_VERSION_base(4,8,0)
-#  if MIN_VERSION_integer_gmp(1,0,0)
+#  if defined MIN_VERSION_integer_gmp
+#    if MIN_VERSION_integer_gmp(1,0,0)
 -- implemented via BigNat, etc here:
 import Numeric.Natural
+#    endif
 #  endif
 #endif
 -- #ifdef VERSION_integer_gmp

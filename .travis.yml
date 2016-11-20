@@ -33,9 +33,6 @@ install:
  - travis_retry cabal update
  - sed -i 's/^jobs:/-- jobs:/' ${HOME}/.cabal/config
  - test -z "$MAYBE_GHCJS" || (test -x $HOME/.cabal/bin/ghcjs  || (cabal install -j2 --constraint='mmorph == 1.0.6' http://ghcjs.luite.com/master.tar.gz && ghcjs-boot --no-prof --no-haddock -j2))
- - cabal install -j2 $MAYBE_GHCJS --only-dependencies --enable-tests -fdev
 
 script:
- - cabal configure $MAYBE_GHCJS -fdev --enable-tests -finstrumented
- - cabal build
- - dist/build/tests/tests
+ - ls -la $HOME

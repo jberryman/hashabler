@@ -77,8 +77,6 @@ library
 
   exposed-modules:     Data.Hashabler
   other-modules:       MachDeps, Data.Hashabler.Internal, Data.Hashabler.SipHash
-  -- other-extensions:    
-                       -- GHC 7.2.1:
   build-depends:       base >=4.6 && <5
                      , array >= 0.4
                      , bytestring

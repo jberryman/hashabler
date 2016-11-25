@@ -1158,7 +1158,7 @@ instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d
 --    X  (then test again with unsafeDupablePerformIO
 --   - look again at core
 --   - consider Text improvements
---   - try again making hash8ByteLoop a totally self-recursive function, or combine with hashRemainingBytes
+--   x try again making hash8ByteLoop a totally self-recursive function, or combine with hashRemainingBytes
 
 
 -- This is about twice as fast as a loop with single byte peeks:

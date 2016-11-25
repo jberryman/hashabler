@@ -444,6 +444,17 @@ hashableBenchmarkSiphash64 =
                 , bench "2^20_128" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl1Mb_128
                 , bench "2^20_64k" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) bl1Mb_64k
                 ]
+            , bgroup "lazy (with siphash-1-3)"
+                [ bench "5" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl5
+                , bench "8" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl8
+                , bench "11" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl11
+                , bench "40" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl40
+                , bench "128" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl128
+                , bench "512" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl512
+                , bench "2^20_40" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl1Mb_40
+                , bench "2^20_128" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl1Mb_128
+                , bench "2^20_64k" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bl1Mb_64k
+                ]
             ]
           , bgroup "String"
             [ bench "5" $ whnf (hashWord64 . siphash64 (SipKey 1 2)) s5

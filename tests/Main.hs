@@ -329,42 +329,42 @@ checkHashableInstances = do
 #  endif
     
     -- Check that ByteStrings hash like [Word8]
-    quickCheckErr 50 $ do
+    quickCheckErr 100 $ do
         let checkBS (Positive bs) = 
               let wd8s = take bs $ iterate (+1) 0
                   bsStrict = B.pack wd8s
                in (hashFNV32 bsStrict) ==
                   (untag32 $ hashFNV32 wd8s)
         forAll' checkBS $ do
-            let maxBytes = 1000*1000
+            let maxBytes = 1000*100
             Positive <$> growingElements [1..maxBytes]
 
     -- Check that P.ByteArrays hash like [Word8]
-    quickCheckErr 50 $ do
+    quickCheckErr 100 $ do
         let checkBA (Positive bs) = 
               let wd8s = take bs $ iterate (+1) 0
                   byteArr = packByteArray wd8s
                in (hashFNV32 byteArr) ==
                   (untag32 $ hashFNV32 wd8s)
         forAll' checkBA $ do
-            let maxBytes = 1000*1000
+            let maxBytes = 1000*100
             Positive <$> growingElements [1..maxBytes]
     
     -- Check that ByteStrings hash like [Word8], after some arbitrary
     -- equivalent transformations (we mainly want to exercise handling of the
     -- length and offset in the ByteString internals)
-    quickCheckErr 50 $ do
+    quickCheckErr 100 $ do
         let checkBS (Positive bs,Positive takeVal,Positive dropVal) = 
               let wd8s = take bs $ iterate (+1) 0
                   b = B.take takeVal $ B.drop dropVal $ B.pack wd8s
                   l =   take takeVal $   drop dropVal $        wd8s
-               in (hashFNV32 b) ==
-                  (untag32 $ hashFNV32 l)
+               in (hashFNV32 b) == (untag32 $ hashFNV32 l) &&
+                  (siphash64_1_3 (SipKey 9 8) b) == (untag64 $ siphash64_1_3 (SipKey 9 8) l)
         forAll' checkBS $ do
-            let maxBytes = 1000*1000
+            let maxBytes = 1000*100
             bs <- growingElements [1..maxBytes]
-            takeVal <- growingElements [1..(maxBytes*2)]
-            dropVal <- growingElements [1..(maxBytes*2)]
+            takeVal <- growingElements [1..(bs+1)]
+            dropVal <- growingElements [1..(bs+1)]
             return (Positive bs,Positive takeVal,Positive dropVal)
 
     -- Check that Text is hashed in big endian, making sure we get some
@@ -389,10 +389,27 @@ checkHashableInstances = do
               error "Collision in the reserved Unicode range for Char"
 
     -- Check that String and Text instances are identical for valid unicode
-    -- code points:
-    quickCheckErr 1000 $ \sDirty -> 
+    -- code points, as well as under arbitrary take and drop transformations
+    -- (to exercise internal Text offset and length)
+    quickCheckErr 1000 $ \(sDirty, Positive takeDirty, Positive dropDirty) -> 
         let s = map T.safe sDirty
-         in (hashFNV32 $ T.pack s) == (untag32 $ hashFNV32 s)
+            takeVal = takeDirty `mod` ((length s)+1)
+            dropVal = dropDirty `mod` (takeVal+1)
+
+            txt = T.pack s
+
+         in (hashFNV32 txt) == 
+            (untag32 $ hashFNV32 s) &&
+
+            (siphash64_1_3 (SipKey 7 8) txt) == 
+            (untag64 $ siphash64_1_3 (SipKey 7 8) s) &&
+
+            (hashFNV32 $ T.drop dropVal $ T.take takeVal txt) == 
+            (untag32 $ hashFNV32 $ drop dropVal $ take takeVal s) &&
+
+            (siphash64_1_3 (SipKey 7 8) $ T.drop dropVal $ T.take takeVal txt) == 
+            (untag64 $ siphash64_1_3 (SipKey 7 8) $ drop dropVal $ take takeVal s)
+
 
     -- checking collisions in an ad hoc way; we especially care about our sum
     -- types with fixed shape. TODO improve; also this is slower than necessary

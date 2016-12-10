@@ -127,10 +127,37 @@ test-suite tests
       buildable: False
 
 
-benchmark bench
+-- Big detailed benchmark suite, many copied from hashable, with a lot of scratch work. To be cleaned up or removed at some point.
+benchmark bench-dev
   type: exitcode-stdio-1.0
   default-language:    Haskell2010
-  main-is:             Main.hs
+  main-is:             Dev.hs
+  ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
+  hs-source-dirs:      benchmarks
+  if flag(instrumented)
+      CPP-Options:     -DASSERTIONS_ON
+  if flag(dev)
+      buildable: True
+      build-depends:   base
+                     , array >= 0.4
+                     , bytestring
+                     , text
+                     , primitive
+
+                     , hashabler
+                     , hashable
+                     , criterion
+                     , deepseq
+  else 
+      buildable: False
+
+-- These are meant to contain a fairly small number of realistic examples that
+-- will be most useful for optimizing siphash and the Hashable instances that
+-- serve it, and comparing performance to Hashable.
+benchmark bench-realistic
+  type: exitcode-stdio-1.0
+  default-language:    Haskell2010
+  main-is:             Realistic.hs
   ghc-options:         -Wall -O2 -threaded -funbox-strict-fields
   hs-source-dirs:      benchmarks
   if flag(instrumented)

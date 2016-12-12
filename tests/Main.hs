@@ -3,6 +3,7 @@ module Main where
 
 import Data.Hashabler
 import qualified Data.ByteString as B
+import qualified Data.ByteString.Char8 as B8
 import qualified Data.ByteString.Lazy as BL
 #if MIN_VERSION_bytestring(0,10,4)
 import qualified Data.ByteString.Short as BSh
@@ -118,7 +119,7 @@ checkVectors = do
         unless (length outs64 > 0 && length outs128 > 0) $
             error "tests invalid"
         unless (outs64 == map Hash64 siphashVectors64) $
-            error $ "Some Siphash64 vectors failed: "++(show outs64)
+            error $ "Some Siphash64 vectors failed: "++(show ( map hashWord64 outs64, siphashVectors64))
         unless (outs128 == map (uncurry Hash128) siphashVectors128) $
             error $ "Some Siphash128 vectors failed: "++(show outs128)
         
@@ -190,6 +191,19 @@ checkMiscUnitTests = do
          in unless (x == 0x78563412 && y == 0x8765432178563412) $ 
               error $ "Problem with byteSwap: "++(show x)++" "++(show y)
 
+    test "unaligned" $ do
+      let bs1 = B8.pack ['\0'..'\31']
+          bs2 = B8.pack ['\1'..'\31']
+          bs3 = B8.pack ['\2'..'\31']
+          {-# NOINLINE bs1 #-}
+          {-# NOINLINE bs2 #-}
+          {-# NOINLINE bs3 #-}
+          x = siphash64 (SipKey 3 4) bs3
+          y = siphash64 (SipKey 3 4) $ B8.drop 1 bs2
+          z = siphash64 (SipKey 3 4) $ B8.drop 2 bs1
+      unless (x == y && x == z) $
+        error $ "Problem with unaligned reads of bytestring: "++(show(x,y,z))
+    
     test "clean8ByteChunk" $ do
       let target = foldr (.|.) 0 $ zipWith shiftL [1..8] [56,48..]
           ba = packByteArray $ take 8 [1..]
@@ -302,7 +316,7 @@ checkHashableInstances = do
 
     -- ...likewise for Text
     quickCheckErr 50 $ do
-        let checkBS (bs,chunkSize) = 
+        let checkBS (bs,Positive chunkSize) = 
               let cs = take bs $ cycle $ take 199 $ iterate succ '0'
                   bsStrict = T.pack cs
                   bsLazyChunked = TL.fromChunks $ map T.pack $ chunk chunkSize cs
@@ -312,7 +326,7 @@ checkHashableInstances = do
             let maxBytes = 1000*1000
             bs <- growingElements [1..maxBytes]
             chunkSize <- choose (1,maxBytes+1)
-            return (bs,chunkSize)
+            return (bs,Positive chunkSize)
 
 #  if MIN_VERSION_bytestring(0,10,4)
     -- Check that ShortByteStrings hash like big strict ones:

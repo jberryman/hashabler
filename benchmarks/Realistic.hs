@@ -10,18 +10,13 @@ module Main where
 
 import Criterion.Main
 import Data.Word
-import Data.Int
-import Data.Ratio
 import Data.Typeable
 import GHC.Generics
 import Data.Data
-import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 import qualified Data.Text.Lazy as TL
-import qualified Data.Primitive as P
 import Control.DeepSeq
 
 import Data.Hashabler
@@ -224,6 +219,7 @@ main = do
               ]
           ]
       , bgroup "ByteString"
+        -- we add some extra benchmarks for special cases that apply to Text etc as well:
         [ bgroup "strict"
           [ env (return $ B8.pack ['\0'..'\4']   ) $ \ ~bs5 ->
             bgroup "5" 
@@ -240,6 +236,29 @@ main = do
              [ bench "siphash64_1_3" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs11
              , bench "hashable" $ whnf Their.hash bs11
              ]
+          -- difficult case: possibly Word + 7 bytes:
+          , env (return $ B8.pack ['\0'..'\14'] ) $ \ ~bs15 ->
+            bgroup "15" 
+             [ bench "siphash64_1_3" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs15
+             , bench "hashable" $ whnf Their.hash bs15
+             ]
+          -- benchmark potential unaligned reads of Words:
+          , env (return $ B8.take 32 $ bs128Noinline ) $ \ ~bs32 ->
+            bgroup "32 (aligned)" 
+             [ bench "siphash64_1_3" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs32
+             , bench "hashable" $ whnf Their.hash bs32
+             ]
+          , env (return $ B8.take 32 $ B8.drop 1 bs128Noinline ) $ \ ~bs32 ->
+            bgroup "32 (off 1)" 
+             [ bench "siphash64_1_3" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs32
+             , bench "hashable" $ whnf Their.hash bs32
+             ]
+          , env (return $ B8.take 32 $ B8.drop 3 bs128Noinline ) $ \ ~bs32 ->
+            bgroup "32 (off 3)" 
+             [ bench "siphash64_1_3" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs32
+             , bench "hashable" $ whnf Their.hash bs32
+             ]
+
           , env (return $ B8.pack ['\0'..'\39'] ) $ \ ~bs40 ->
             bgroup "40" 
              [ bench "siphash64_1_3" $ whnf (hashWord64 . siphash64_1_3 (SipKey 1 2)) bs40
@@ -433,3 +452,8 @@ main = do
           ]
         ]
       ]
+
+-- try to make sure no funny business happens and we can check different offsets
+bs128Noinline :: B8.ByteString
+{-# NOINLINE bs128Noinline #-}
+bs128Noinline = B8.pack ['\0'..'\127']

@@ -1,5 +1,9 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 {-# LANGUAGE RecordWildCards, BangPatterns, CPP #-}
+#ifdef USING_x86_64_ASM_SIPROUND
+{-# LANGUAGE GHCForeignImportPrim, ForeignFunctionInterface, MagicHash, UnboxedTuples, UnliftedFFITypes #-}
+#endif
+
 module Data.Hashabler.SipHash (
     siphash64
   , siphash64_1_3
@@ -19,16 +23,57 @@ import Data.Bits
 import Control.Exception(assert)
 
 import Data.Hashabler.Internal
+#ifdef USING_x86_64_ASM_SIPROUND
+import GHC.Prim
+import GHC.Word
+#endif
 
 
-{- Hard-coded for now. TODO later make configurable if desired
--- /* default: SipHash-2-4 */
--- #define cROUNDS 2
--- #define dROUNDS 4
-cROUNDS, dROUNDS :: Int
-cROUNDS = 2
-dROUNDS = 4
--}
+-- TODO TEST sipRounds against sipRound
+
+
+
+sipRound :: Word64 -> Word64 -> Word64 -> Word64 -> Identity (Word64, Word64, Word64, Word64)
+{-# INLINE[2] sipRound #-}
+
+sipRounds :: Int -> Word64 -> Word64 -> Word64 -> Word64 -> Identity (Word64, Word64, Word64, Word64)
+{-# INLINE[3] sipRounds #-}
+
+
+#ifdef USING_x86_64_ASM_SIPROUND
+
+-------------  ASM SIPROUNDS THAT LET US EMIT ROTATE  -------------
+
+-- see `sipround_x86_64.S`
+#define sipRoundImport(sipRound_s_xNUM) \
+foreign import prim "sipRound_s_xNUM"   \
+  sipRound_s_xNUM# :: Word# -> Word# -> Word# -> Word# -> (# Word#, Word#, Word#, Word# #)   ;\
+;\
+sipRound_s_xNUM ::  Word64 -> Word64 -> Word64 -> Word64 -> (Word64, Word64, Word64, Word64)   ;\
+{-# INLINE sipRound_s_xNUM #-}   ;\
+sipRound_s_xNUM (W64# v0) (W64# v1) (W64# v2) (W64# v3) = case sipRound_s_xNUM# v0 v1 v2 v3 of   ;\
+  (# v0', v1', v2', v3' #) -> (W64# v0', W64# v1', W64# v2', W64# v3')
+  
+sipRoundImport(sipRound_s_x1)
+sipRoundImport(sipRound_s_x2)
+sipRoundImport(sipRound_s_x3)
+sipRoundImport(sipRound_s_x4)
+
+sipRound v0 v1 v2 v3 = return $ sipRound_s_x1 v0 v1 v2 v3
+
+-- to promote inlining:
+sipRounds 0 = error "The number of rounds must be > 0" 
+sipRounds 1 = \v0 v1 v2 v3 ->
+    return $ sipRound_s_x1 v0 v1 v2 v3
+sipRounds 2 = \v0 v1 v2 v3 ->
+    return $ sipRound_s_x2 v0 v1 v2 v3
+sipRounds 3 = \v0 v1 v2 v3 ->
+    return $ sipRound_s_x3 v0 v1 v2 v3
+sipRounds 4 = \v0 v1 v2 v3 ->
+    return $ sipRound_s_x4 v0 v1 v2 v3
+#else
+
+------------------   PURE HASKELL SIPROUNDS   ---------------------
 
 -- #define ROTL(x,b) (uint64_t)( ((x) << (b)) | ( (x) >> (64 - (b))) )
 rotl :: Word64 -> Int -> Word64
@@ -36,9 +81,6 @@ rotl :: Word64 -> Int -> Word64
 rotl x b = assert (b > 0 && b < 64) $
     (x `unsafeShiftL` b) .|. (x `unsafeShiftR` (64 - b))
 
-
-sipRound :: Word64 -> Word64 -> Word64 -> Word64 -> Identity (Word64, Word64, Word64, Word64)
-{-# INLINE[2] sipRound #-}
 sipRound v0 v1 v2 v3 = do
     v0 <- return $ v0 + v1 
     v1 <- return $ rotl v1 13
@@ -60,8 +102,6 @@ sipRound v0 v1 v2 v3 = do
     return (v0, v1, v2, v3)
 
 -- to promote inlining:
-sipRounds :: Int -> Word64 -> Word64 -> Word64 -> Word64 -> Identity (Word64, Word64, Word64, Word64)
-{-# INLINE[3] sipRounds #-}
 sipRounds 0 = error "The number of rounds must be > 0" 
 sipRounds 1 = \v0 v1 v2 v3 -> do
     sipRound v0 v1 v2 v3
@@ -77,12 +117,12 @@ sipRounds 4 = \v0 v1 v2 v3 -> do
     (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
     (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
     sipRound v0 v1 v2 v3
+#endif
 sipRounds n = go n where
   go 0 v0 v1 v2 v3 = return (v0,v1,v2,v3)
   go n' v0 v1 v2 v3 = do
     (v0,v1,v2,v3) <- sipRound v0 v1 v2 v3
     go (n'-1) v0 v1 v2 v3
-
 
 
 -- | A 128-bit secret key. This should be generated randomly and must be kept

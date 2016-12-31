@@ -75,6 +75,11 @@ library
       ghc-options:     -fno-ignore-asserts
       ghc-prof-options: -fprof-auto -auto-all -caf-all
 
+  if arch(x86_64)
+    cpp-options: -DUSING_x86_64_ASM_SIPROUND
+    -- NOTE: capital "S" gets us a CPP pass from gcc:
+    c-sources:           naughtybits/sipround_x86_64.S
+
   exposed-modules:     Data.Hashabler
   other-modules:       MachDeps, Data.Hashabler.Internal, Data.Hashabler.SipHash
   build-depends:       base >=4.6 && <5

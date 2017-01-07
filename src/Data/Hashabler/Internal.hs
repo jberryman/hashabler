@@ -29,8 +29,8 @@ import qualified Data.Text.Internal as T
 import qualified Data.Text.Array as T (Array(..))
 import qualified Data.Primitive as P
 import qualified Data.Text.Lazy as TL (foldlChunks, Text)
-import Foreign.ForeignPtr (withForeignPtr)
-import Foreign.Storable (peekByteOff)
+import Foreign.ForeignPtr (ForeignPtr, withForeignPtr)
+import Foreign.Storable (Storable, peekByteOff)
 
 import Control.Exception(assert)
 
@@ -1161,36 +1161,43 @@ instance (StableHashable a, StableHashable b, StableHashable c, StableHashable d
 --   x try again making hash8ByteLoop a totally self-recursive function, or combine with hashRemainingBytes
 
 
+
+-- as in `unsafeHead` in 'bytestring'
+-- https://github.com/haskell/bytestring/blob/98baea1577b38c80a1a23e97e9df96b10b40dc97/Data/ByteString/Unsafe.hs#L77
+accursedBlahBlah_peekByteOff :: Storable a => ForeignPtr b -> Int -> a
+{-# INLINE accursedBlahBlah_peekByteOff #-}
+accursedBlahBlah_peekByteOff fp ix =
+  accursedUnutterablePerformIO $ withForeignPtr fp $ \base -> peekByteOff base ix
+
 -- This is about twice as fast as a loop with single byte peeks:
 hashByteString :: (HashState h)=> h -> B.ByteString -> h
 {-# INLINE hashByteString #-}
 hashByteString h = \(B.PS fp off lenBytes) ->
-  -- similar to: https://github.com/haskell/bytestring/blob/dd3c07d115840d13482426a0084a39201eb6b6d4/Data/ByteString/Unsafe.hs#L78
-  -- 'hashable' also uses this.
-  accursedUnutterablePerformIO $
-      withForeignPtr fp $ \base ->
-        let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
-            !ixOutOfBounds = off+lenBytes
-            -- index where we begin to read (bytesRem < 8) individual bytes:
-            !bytesIx = ixOutOfBounds-bytesRem
+  let !bytesRem = lenBytes .&. 7  -- lenBytes `mod` 8
+      !ixOutOfBounds = off+lenBytes
+      -- index where we begin to read (bytesRem < 8) individual bytes:
+      !bytesIx = ixOutOfBounds-bytesRem
 
-            hash8ByteLoop !hAcc !ix 
-                | ix == bytesIx = hashRemainingBytes hAcc bytesIx
-                | otherwise     = assert (ix < bytesIx) $ do
-                    -- TODO do we need to worry about alignment constraints for peek here?
-                    -- TODO PERFORMANCE: especially if above is necessary:
-                    --    try eliminating a branch advancing ix by 0 for remaining byts of a word, so we replicate last byte
-                    w64Dirty <- peekByteOff base ix
-                    let w64 = clean8ByteChunk w64Dirty
-                    hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
+      hash8ByteLoop !hAcc !ix 
+          | ix == bytesIx = hashRemainingBytes hAcc bytesIx
+          | otherwise     = assert (ix < bytesIx) $
+              -- TODO do we need to worry about alignment constraints for peek here?
+              -- TODO PERFORMANCE: especially if above is necessary:
+              --    try eliminating a branch advancing ix by 0 for remaining byts of a word, so we replicate last byte
+              let !w64Dirty = accursedBlahBlah_peekByteOff fp ix
+                  !w64 = clean8ByteChunk w64Dirty
+               in hash8ByteLoop (hAcc `mix64` w64) (ix + 8)
 
-            hashRemainingBytes !hAcc !ix 
-                | ix == ixOutOfBounds = return hAcc
-                | otherwise = assert (ix < ixOutOfBounds) $ do
-                    byt <- peekByteOff base ix
-                    hashRemainingBytes (hAcc `mix8` byt) (ix+1)
+      hashRemainingBytes !hAcc !ix 
+          | ix == ixOutOfBounds = hAcc
+          | otherwise = assert (ix < ixOutOfBounds) $
+              let !byt = accursedBlahBlah_peekByteOff fp ix
+               in hashRemainingBytes (hAcc `mix8` byt) (ix+1)
 
-         in hash8ByteLoop h off 
+   -- NOTE: using accursedBlahBlah_peekByteOff in the bodies of loops above
+   -- seems to allow `h` to stay unboxed at the call site, important for e.g.
+   -- siphash on small bytestrings where that overhead is significant.
+   in hash8ByteLoop h off 
 
 
 

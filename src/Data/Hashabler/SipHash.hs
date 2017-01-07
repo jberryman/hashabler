@@ -133,9 +133,6 @@ instance HashState Sip_1 where
 -- incoming chunk and only hashing in "full" mparts. The issue with the latter
 -- is we don't want to get "out of phase", e.g. we start receiving 64-bit
 -- chunks while bytesRemaining == 4. 
---   TODO play with hashing different structures and benchmark, think of some
---   pathological inputs, experiment with splitting inputs but padding with a
---   single byte so that we eventually can get back into phase.
 siphashForWord :: (Integral m, 
 #                  if MIN_VERSION_base(4,7,0)
                     FiniteBits m

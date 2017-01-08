@@ -221,7 +221,7 @@ benchmark core
       buildable: False
 
   if flag(dev)
-      ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings
+      ghc-options: -ddump-to-file -ddump-simpl -dsuppress-module-prefixes -dsuppress-uniques -ddump-core-stats -ddump-inlinings -ddump-asm
       ghc-options: -O2  -rtsopts -funbox-strict-fields
  
   -- Either do threaded for eventlogging and simple timing...
